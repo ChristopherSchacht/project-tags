@@ -88,6 +88,9 @@ class KeywordExtractor:
                 }
             )
             
+            if not keywords_result['success']:
+                raise AIError(keywords_result.get('error', 'Unknown AI error'))
+            
             # Save results
             timestamp = get_timestamp()
             results = {
@@ -105,15 +108,25 @@ class KeywordExtractor:
             # Display results
             result_text = "Processing complete!\n\nExtracted Keywords:\n"
             for kw in keywords_result['keywords']:
-                result_text += f"• {kw['keyword']} (Relevance: {kw['relevance']:.2f})\n"
+                result_text += f"• {kw['keyword']}\n"
             result_text += f"\nResults saved to: {output_path}\n"
             result_text += f"Word cloud saved to: {wordcloud_path}\n"
             
+            # Ensure we send all final updates to the GUI
             message_queue.put({'action': 'update_results', 'text': result_text})
             message_queue.put({'action': 'set_status', 'text': "Processing complete"})
+            message_queue.put({'action': 'enable_button'})
+            message_queue.put({'action': 'stop_progress'})
             
         except Exception as e:
             logger.error(f"Processing error: {str(e)}")
+            message_queue.put({
+                'action': 'update_results', 
+                'text': f"Error during processing: {str(e)}\n"
+            })
+            message_queue.put({'action': 'set_status', 'text': "Error"})
+            message_queue.put({'action': 'enable_button'})
+            message_queue.put({'action': 'stop_progress'})
             raise
 
 def main():

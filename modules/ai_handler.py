@@ -362,7 +362,7 @@ class AIHandler:
 
             # Format prompt with detailed sections
             prompt = f"""ANALYZE AND TAG THIS DOCUMENT:
-                
+
                 === METADATA ===
                 Title: {metadata.get('title', 'N/A')}
                 Category: {metadata.get('category', 'N/A')}
@@ -370,27 +370,27 @@ class AIHandler:
                 Target Age: {metadata.get('target_age_group', 'N/A')}
                 Denomination: {metadata.get('denomination', 'N/A')}
                 Bible Passages: {metadata.get('bible_passage', 'N/A')}
-                
+
                 === CONTENT ===
                 {content.get('text', '')}
-                
+
                 === KEY INFORMATION ===
                 Most Relevant Words (Top {MAX_WORDS_FOR_AI}):
                 {self._format_word_frequencies(word_frequencies)}
-                
+
                 Document Statistics:
                 Total Words: {statistics.get('processed_words', 'N/A')}
                 Unique Words: {statistics.get('unique_words', 'N/A')}
                 Sentences: {content.get('metadata', {}).get('sentence_count', 'N/A')}
-                
+
                 Main Topics:
                 {self._format_suggested_topics(content.get('suggested_topics', []))}
-                
+
                 REQUIRED OUTPUT:
-                
+
                 ANALYSIS:
                 [2-3 sentences identifying the specific document type and subject]
-                
+
                 TAGS:
                 {{
                   "tags": [
@@ -399,7 +399,7 @@ class AIHandler:
                     {{"index": n, "tag": "final"}}
                   ]
                 }}
-                
+
                 CRITICAL TAG RULES:
                 - Each tag is ONE single word
                 - Include general terms and specific identifiers
@@ -531,102 +531,155 @@ class AIHandler:
     async def extract_keywords(self, metadata: Dict, content: Dict) -> Dict:
         """
         Extract keywords with enhanced content analysis and stricter response parsing.
-        Returns a dictionary with 'tags' instead of 'keywords' for consistency.
-
+        Returns a dictionary with both 'tags' and 'keywords' for backward compatibility.
+    
         Args:
             metadata: Document metadata
             content: Content and analysis data
-
+    
         Returns:
             Dict: Extraction results including keywords and processing metadata
         """
         start_time = time.time()
-
-        try:
-            # Generate cache key
-            cache_key = self._get_cache_key({
-                'metadata': metadata,
-                'content': content
-            })
-
-            # Check cache
-            cached = await self._get_cached_response(cache_key)
-            if cached:
-                self.ai_logger.log_ai_response("Using cached response", cached)
-                return cached
-
-            self.request_stats['cache_misses'] += 1
-
-            # Format prompt and make request
-            prompt = self._format_prompt(metadata, content)
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt}
-            ]
-
-            response = await self._make_ai_request(messages)
-
-            # Extract JSON part from response using stricter parsing
+        retry_count = 0
+        max_retries = AI_SETTINGS['retry_attempts']
+        
+        while retry_count < max_retries:
             try:
-                # Find JSON block
-                json_start = response.find('{\n  "tags":')
-                json_end = response.rfind('}') + 1
-
-                if json_start == -1:
-                    raise AIResponseError("No JSON tags block found")
-
-                json_str = response[json_start:json_end]
-
-                # Parse JSON
-                parsed_data = json.loads(json_str)
-
-                if not isinstance(parsed_data, dict) or 'tags' not in parsed_data:
-                    raise AIResponseError("Invalid JSON structure")
-
-                result = parsed_data['tags']
-
-            except (json.JSONDecodeError, KeyError) as e:
-                raise AIResponseError(f"Invalid JSON response: {str(e)}")
-
-            if not self._validate_response(result):
-                raise AIResponseError("Response validation failed")
-
-            # Sort tags by index
-            result.sort(key=lambda x: x['index'])
-
-            # Prepare final result with metadata
-            final_result = {
-                'tags': result,  # Changed from 'keywords' to 'tags' for consistency
-                'processing_time': time.time() - start_time,
-                'cached': False,
-                'success': True,
-                'metadata': {
-                    'timestamp': get_timestamp(),
-                    'model': self.model,
-                    'temperature': self.temperature
-                }
-            }
-
-            # Log final parsed result
-            self.ai_logger.log_ai_response(response, final_result)
-
-            # Cache result
-            self._cache_response(cache_key, final_result)
-
-            return final_result
-
-        except Exception as e:
-            logger.error(f"Keyword extraction failed: {str(e)}")
-            return {
-                'tags': [],  # Changed from 'keywords' to 'tags' for consistency
-                'processing_time': time.time() - start_time,
-                'error': str(e),
-                'success': False,
-                'metadata': {
-                    'timestamp': get_timestamp(),
-                    'error_type': type(e).__name__
-                }
-            }
+                # Generate cache key
+                cache_key = self._get_cache_key({
+                    'metadata': metadata,
+                    'content': content
+                })
+    
+                # Check cache
+                cached = await self._get_cached_response(cache_key)
+                if cached:
+                    self.ai_logger.log_ai_response("Using cached response", cached)
+                    return cached
+    
+                self.request_stats['cache_misses'] += 1
+    
+                # Format prompt and make request
+                prompt = self._format_prompt(metadata, content)
+                if retry_count > 0:
+                    # Add clearer format instructions for retry attempts
+                    prompt += "\n\nIMPORTANT: Each tag MUST be in the format: {\"index\": number, \"tag\": \"word\"}"
+                
+                messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ]
+    
+                response = await self._make_ai_request(messages)
+    
+                # Extract JSON part from response
+                try:
+                    # Find JSON block
+                    json_start = response.find('{')
+                    json_end = response.rfind('}') + 1
+    
+                    if json_start == -1:
+                        raise AIResponseError("No JSON block found")
+    
+                    json_str = response[json_start:json_end]
+                    parsed_data = json.loads(json_str)
+    
+                    # Handle different tag formats
+                    tags = []
+                    if 'tags' in parsed_data:
+                        raw_tags = parsed_data['tags']
+                        
+                        # Handle array of strings format
+                        if isinstance(raw_tags, list) and all(isinstance(x, str) for x in raw_tags):
+                            tags = [
+                                {
+                                    'tag': tag.strip(),
+                                    'index': idx + 1
+                                }
+                                for idx, tag in enumerate(raw_tags)
+                            ]
+                        # Handle array of objects format
+                        elif isinstance(raw_tags, list) and all(isinstance(x, dict) for x in raw_tags):
+                            tags = raw_tags
+                        else:
+                            raise AIResponseError("Unrecognized tags format")
+    
+                        # Validate and clean tags
+                        validated_tags = []
+                        for tag in tags:
+                            if isinstance(tag, dict) and 'tag' in tag:
+                                validated_tag = {
+                                    'tag': str(tag.get('tag', '')).strip(),
+                                    'index': int(tag.get('index', len(validated_tags) + 1))
+                                }
+                                if validated_tag['tag']:  # Only add non-empty tags
+                                    validated_tags.append(validated_tag)
+    
+                        if not validated_tags:
+                            raise AIResponseError("No valid tags found")
+    
+                        # Sort tags by index
+                        validated_tags.sort(key=lambda x: x['index'])
+    
+                        # Convert tags to keywords format for backward compatibility
+                        keywords = [
+                            {
+                                'keyword': tag['tag'],
+                                'relevance': 1.0,
+                                'index': tag['index']
+                            }
+                            for tag in validated_tags
+                        ]
+    
+                        # Prepare final result with metadata
+                        final_result = {
+                            'tags': validated_tags,
+                            'keywords': keywords,
+                            'processing_time': time.time() - start_time,
+                            'cached': False,
+                            'success': True,
+                            'metadata': {
+                                'timestamp': get_timestamp(),
+                                'model': self.model,
+                                'temperature': self.temperature
+                            }
+                        }
+    
+                        # Log final parsed result
+                        self.ai_logger.log_ai_response(response, final_result)
+    
+                        # Cache result
+                        self._cache_response(cache_key, final_result)
+    
+                        return final_result
+    
+                    else:
+                        raise AIResponseError("No tags found in response")
+    
+                except (json.JSONDecodeError, KeyError) as e:
+                    raise AIResponseError(f"Invalid JSON response: {str(e)}")
+    
+            except Exception as e:
+                logger.error(f"Attempt {retry_count + 1} failed: {str(e)}")
+                retry_count += 1
+                
+                if retry_count >= max_retries:
+                    logger.error(f"All {max_retries} attempts failed")
+                    return {
+                        'tags': [],
+                        'keywords': [],
+                        'processing_time': time.time() - start_time,
+                        'error': str(e),
+                        'success': False,
+                        'metadata': {
+                            'timestamp': get_timestamp(),
+                            'error_type': type(e).__name__
+                        }
+                    }
+                
+                # Wait before retry (you might want to add exponential backoff here)
+                await asyncio.sleep(1)  # Simple delay between retries
 
     def get_stats(self) -> Dict:
         """
