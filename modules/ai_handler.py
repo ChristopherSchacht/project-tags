@@ -361,64 +361,52 @@ class AIHandler:
             word_frequencies = analysis.get('word_frequencies', {})
 
             # Format prompt with detailed sections
-            prompt = f"""
-            # **Aufgabe:**
-            Erstelle mindestens {AI_SETTINGS['min_keywords']} bis idealerweise **{AI_SETTINGS['max_keywords']}** aussagekräftige Tags im JSON-Format, die das Dokument präzise beschreiben. Diese Tags sollen das Wesen, Hauptthemen, Namen und -konzepte erfassen und können auch inferierte Begriffe enthalten, die nicht direkt vorkommen, aber es ideal beschreiben.
-
-            ## **Ziel:**
-            Erstellen Sie eine Liste von Tags, die für die Suche und das Verknüpfen ähnlicher Inhalte auf unserer Plattform verwendet werden können.
-
-            ## **Vorgehensweise:**
-            - Analysieren Sie die bereitgestellten Metadaten, den Inhalt und die Wortstatistiken sorgfältig
-            - Beachten Sie besonders Wörter mit hoher TF-IDF-Relevanz
-            - Identifizieren Sie Worte die den Kern des Dokuments darstellen
-            - Schließen Sie relevante Begriffe ein, die das Thema umfassend darstellen, auch wenn sie nicht explizit im Text erwähnt werden
-            - Vermeiden Sie allgemeine Füllwörter und nicht aussagekräftige Begriffe
-
-            ## **ANTWORTEN SIE SO:**
-            A. Ausgeschriebene Überlegung und Analyse, worum es sich bei dem Dokument vermutlich handelt und welche Schlagworte als Tags wichtig wären, um das Dokument bestmöglich und spezifisch zu beschreiben.
-            B. (CRITICAL OUTPUT FORMAT FOR TAGS!) Die Tags ausschließlich als ein zusammenhängendes intaktes JSON mit fortlaufender Nummerierung, zum Beispiel:
-            {{
-              "tags": [
-                {{"index": 1, "tag": "..."}},
-                {{"index": 2, "tag": "..."}}
-              ]
-            }}
-            C. Stoppen Sie nach dem fertigen JSON!
-
-            ## **Eingaben:**
-
-            1. **Metadaten:**
-            - **Titel:** {metadata.get('title', 'N/A')}
-            - **Beschreibung:** {metadata.get('description', 'N/A')}
-            - **Kategorie:** {metadata.get('category', 'N/A')}
-            - **Denomination:** {metadata.get('denomination', 'N/A')}
-            - **Zielgruppe (Alter):** {metadata.get('target_age_group', 'N/A')}
-            - **Anwendungsbereich:** {metadata.get('area_of_application', 'N/A')}
-            - **Bibelstellen:** {metadata.get('bible_passage', 'N/A')}
-            - **Thumbnail:** {metadata.get('thumbnail', 'N/A')}
-
-            2. **Inhalt:**
-            {content.get('text', '')}
-
-            3. **Wortanalyse (Top {MAX_WORDS_FOR_AI} relevante Wörter mit Statistiken):**
-            {self._format_word_frequencies(word_frequencies)}
-
-            4. **Allgemeine Statistiken:**
-            - Gesamtanzahl der Wörter: {statistics.get('processed_words', 'N/A')}
-            - Einzigartige Wörter: {statistics.get('unique_words', 'N/A')}
-            - Durchschnittliche Wortlänge: {statistics.get('average_word_length', 'N/A'):.2f}
-            - Anzahl der Sätze: {content.get('metadata', {}).get('sentence_count', 'N/A')}
-
-            5. **Vorgeschlagene Themen:**
-            {self._format_suggested_topics(content.get('suggested_topics', []))}
-
-            ## **Hinweise:**
-            - Die Tags sollen relevant und prägnant sein
-            - Die Tags sollen nach Möglichkeit Einzelwörter sein. Anstelle von Leerzeichen nutzen Sie seperate Tags.
-            - Nur Worte aus den Sprachen, die im Dokument gesprochen werden, oder Namen
-            - Beachten Sie besonders Wörter mit hoher kombinierter Relevanz und TF-IDF-Werten
-            """
+            prompt = f"""ANALYZE AND TAG THIS DOCUMENT:
+                
+                === METADATA ===
+                Title: {metadata.get('title', 'N/A')}
+                Category: {metadata.get('category', 'N/A')}
+                Application: {metadata.get('area_of_application', 'N/A')}
+                Target Age: {metadata.get('target_age_group', 'N/A')}
+                Denomination: {metadata.get('denomination', 'N/A')}
+                Bible Passages: {metadata.get('bible_passage', 'N/A')}
+                
+                === CONTENT ===
+                {content.get('text', '')}
+                
+                === KEY INFORMATION ===
+                Most Relevant Words (Top {MAX_WORDS_FOR_AI}):
+                {self._format_word_frequencies(word_frequencies)}
+                
+                Document Statistics:
+                Total Words: {statistics.get('processed_words', 'N/A')}
+                Unique Words: {statistics.get('unique_words', 'N/A')}
+                Sentences: {content.get('metadata', {}).get('sentence_count', 'N/A')}
+                
+                Main Topics:
+                {self._format_suggested_topics(content.get('suggested_topics', []))}
+                
+                REQUIRED OUTPUT:
+                
+                ANALYSIS:
+                [2-3 sentences identifying the specific document type and subject]
+                
+                TAGS:
+                {{
+                  "tags": [
+                    {{"index": 1, "tag": "word"}},
+                    {{"index": 2, "tag": "another"}},
+                    {{"index": n, "tag": "final"}}
+                  ]
+                }}
+                
+                CRITICAL TAG RULES:
+                - Each tag is ONE single word
+                - Include general terms and specific identifiers
+                - Split compound terms into separate tags
+                - {AI_SETTINGS['min_keywords']} to {AI_SETTINGS['max_keywords']} tags total
+                - Only lowercase letters
+                - No special characters"""
 
             # Log generated prompt
             self.ai_logger.log_prompt_generation(prompt)
