@@ -20,8 +20,12 @@ TEMP_DIR = PROJECT_ROOT / "temp"
 CACHE_DIR = PROJECT_ROOT / "cache"
 LOG_DIR = PROJECT_ROOT / "logs"
 
-# Resource paths
-STOPWORDS_DE_PATH = CONFIG_DIR / "stopwords_de.txt"
+# Language settings
+SUPPORTED_LANGUAGES = ['en', 'de']
+DEFAULT_LANGUAGE = 'en'
+
+# Path to the user-defined stopwords. 
+STOPWORDS_DE_PATH = CONFIG_DIR / "stopwords_de.txt" 
 STOPWORDS_EN_PATH = CONFIG_DIR / "stopwords_en.txt"
 
 # Create necessary directories
@@ -39,6 +43,16 @@ MIN_WORD_LENGTH = 3
 MAX_WORD_LENGTH = 45
 MIN_WORD_FREQUENCY = 2
 
+# Word selection settings
+MAX_WORDS_FOR_AI = 50  # Increase to capture more context
+WORD_SCORE_WEIGHTS = {
+    'frequency_weight': 0.3,  # Give less weight to raw frequency
+    'tfidf_weight': 0.7      # Give more weight to TF-IDF scores
+}
+
+# Minimum TF-IDF score threshold to consider a word significant
+MIN_TFIDF_THRESHOLD = 0.1
+
 # PDF processing settings
 MAX_PAGES_FOR_ANALYSIS = 25
 PDF_CHUNK_SIZE = 1000  # characters
@@ -55,7 +69,7 @@ AI_SETTINGS = {
     "request_timeout": 60,
     "retry_attempts": 3,
     "retry_delay": 2,
-    "max_text_chars": 50000
+    "max_text_chars": 50000 # Number of characters that are passed on to the ai of the original contents first MAX_PAGES_FOR_ANALYSIS pages
 }
 
 # Metadata template
@@ -68,26 +82,6 @@ DEFAULT_METADATA = {
     "target_age_group": "",
     "area_of_application": "",
     "properties": []
-}
-
-# Language settings
-SUPPORTED_LANGUAGES = ['en', 'de']
-DEFAULT_LANGUAGE = 'en'
-
-# Common stopwords for content analysis
-COMMON_STOPWORDS = {
-    'en': [
-        'would', 'could', 'should', 'might', 'must', 'cant', 'cannot',
-        'im', 'ive', 'id', 'youre', 'youve', 'wed', 'well', 'theyre',
-        'wont', 'dont', 'doesnt', 'didnt', 'wasnt', 'werent', 'hasnt',
-        'havent', 'hadnt', 'isnt'
-    ],
-    'de': [
-        'würde', 'könnte', 'sollte', 'möchte', 'muss', 'kann', 'kannst',
-        'wird', 'werden', 'wurde', 'wurden', 'hab', 'habe', 'hatte',
-        'hätte', 'sein', 'seine', 'seinen', 'seiner', 'seines', 'nicht',
-        'nich', 'diese', 'diesem', 'diesen', 'dieser', 'dieses'
-    ]
 }
 
 # File type settings

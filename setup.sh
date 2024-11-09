@@ -39,7 +39,7 @@ fi
 
 # Create project directory structure
 echo -e "${BLUE}Creating project structure...${NC}"
-mkdir -p {config,modules,output,temp,cache,logs,tests}
+mkdir -p {config,modules,gui,output,temp,cache,logs,tests}
 
 # Create virtual environment
 echo -e "${BLUE}Creating virtual environment...${NC}"
@@ -143,9 +143,22 @@ fi
 echo -e "${BLUE}Setting up project files...${NC}"
 touch modules/__init__.py
 touch config/__init__.py
+touch gui/__init__.py
 touch tests/__init__.py
 
-# Create .env file template (rest remains the same)
+# Create gui module structure
+echo -e "${BLUE}Setting up GUI module...${NC}"
+cat > gui/__init__.py << EOL
+"""
+GUI module for the keyword extraction system.
+Contains all GUI-related components and handlers.
+"""
+from .app_window import AppWindow
+
+__all__ = ['AppWindow']
+EOL
+
+# Create .env file template
 echo -e "${BLUE}Creating .env template...${NC}"
 cat > .env.template << EOL
 # API Configuration
@@ -159,7 +172,7 @@ LOG_LEVEL=INFO
 MAX_UPLOAD_SIZE=10485760  # 10MB in bytes
 EOL
 
-# Create basic test file (rest remains the same)
+# Create basic test file
 echo -e "${BLUE}Creating basic test setup...${NC}"
 cat > tests/test_basic.py << EOL
 def test_imports():
@@ -168,12 +181,13 @@ def test_imports():
         from modules.pdf_processor import PDFProcessor
         from modules.text_analyzer import TextAnalyzer
         from modules.ai_handler import AIHandler
+        from gui.app_window import AppWindow
         assert True
     except ImportError as e:
         assert False, f"Import failed: {str(e)}"
 EOL
 
-# Create .gitignore (rest remains the same)
+# Create .gitignore
 echo -e "${BLUE}Creating .gitignore...${NC}"
 cat > .gitignore << EOL
 # Python
@@ -220,11 +234,44 @@ nltk_data/
 .DS_Store
 EOL
 
-echo -e "${GREEN}Setup complete! Your virtual environment is ready.${NC}"
+# Create directory structure guide
+echo -e "${BLUE}Creating project structure documentation...${NC}"
+cat > PROJECT_STRUCTURE.md << EOL
+# Project Structure
+
+\`\`\`
+keyword_extraction/
+├── config/           # Configuration files and settings
+│   ├── __init__.py
+│   └── config.py
+├── gui/             # GUI components
+│   ├── __init__.py
+│   └── app_window.py
+├── modules/         # Core processing modules
+│   ├── __init__.py
+│   ├── pdf_processor.py
+│   ├── text_analyzer.py
+│   └── ai_handler.py
+├── tests/           # Test files
+│   ├── __init__.py
+│   └── test_basic.py
+├── output/          # Generated output files
+├── temp/            # Temporary files
+├── cache/           # Cache files
+├── logs/            # Log files
+├── main.py          # Application entry point
+├── setup.sh         # Setup script
+├── requirements.txt # Project dependencies
+└── .env            # Environment variables
+\`\`\`
+EOL
+
+echo -e "${GREEN}Setup complete! Your development environment is ready.${NC}"
 echo -e "${BLUE}Additional steps you might want to take:${NC}"
 echo -e "1. Copy .env.template to .env and configure your settings"
 echo -e "2. Run tests with 'pytest tests/'"
 echo -e "3. If NLTK data download failed, try running 'python setup_nltk.py' manually"
+echo -e "\n${GREEN}Project structure has been documented in PROJECT_STRUCTURE.md${NC}"
 echo -e "\n${GREEN}To activate the virtual environment, run:${NC}"
 echo -e "source venv/bin/activate"
 echo -e "${GREEN}To deactivate, simply run:${NC}"

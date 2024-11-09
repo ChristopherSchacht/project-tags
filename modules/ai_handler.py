@@ -27,7 +27,10 @@ from config.config import (
     CACHE_DIR,
     ERROR_MESSAGES,
     SYSTEM_PROMPT,
-    CACHE_DURATION
+    CACHE_DURATION,
+    MAX_WORDS_FOR_AI, 
+    WORD_SCORE_WEIGHTS, 
+    MIN_TFIDF_THRESHOLD
 )
 from modules.utils import (
     setup_logging,
@@ -39,7 +42,7 @@ from modules.utils import (
 # Initialize logger
 logger = setup_logging(__name__)
 
-# Add new logging configuration
+# Add logging configuration
 DETAILED_LOGGING = True  # Set to False to disable detailed AI input/output logging
 LOG_DIR = Path('logs')
 AI_LOG_DIR = LOG_DIR / 'ai_interactions'
@@ -277,26 +280,42 @@ class AIHandler:
             f"- {key}: {value}"
             for key, value in stats.items()
         )
-
-    def _format_frequencies(self, frequencies: Dict) -> str:
-        """Format word frequencies for prompt."""
-        sorted_freq = sorted(
-            frequencies.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:50]  # Top 50 words
-        
-        return "\n".join(
-            f"- {word}: {freq}"
-            for word, freq in sorted_freq
-        )
-
-    def _format_phrases(self, phrases: Dict) -> str:
-        """Format phrases for prompt."""
-        return "\n".join(
-            f"- {phrase}: {score:.3f}"
-            for phrase, score in phrases.items()
-        )
+    
+    def _format_word_frequencies(self, word_data: Dict) -> str:
+        """
+        Format word frequency data for the prompt in a simplified format.
+        Only shows word and relevance score, sorted by relevance.
+    
+        Args:
+            word_data: Dictionary containing word statistics
+    
+        Returns:
+            str: Simplified string of word information
+        """
+        try:
+            formatted_entries = []
+            
+            for word, stats in word_data.items():
+                # Get the relevance score (combined_score)
+                if isinstance(stats, dict) and 'combined_score' in stats:
+                    relevance = stats['combined_score']
+                else:
+                    continue
+                    
+                formatted_entries.append((word, relevance))
+            
+            # Sort by relevance score (descending)
+            formatted_entries.sort(key=lambda x: x[1], reverse=True)
+            
+            # Format as simple comma-separated list
+            return ', '.join(
+                f"{word} ({relevance:.3f})"
+                for word, relevance in formatted_entries
+            )
+            
+        except Exception as e:
+            logger.error(f"Error formatting word frequencies: {str(e)}")
+            return "Error formatting word data"
     
     def _format_suggested_topics(self, topics: List[str]) -> str:
         """
@@ -310,7 +329,7 @@ class AIHandler:
                  Falls keine Themen vorhanden sind, wird eine entsprechende Nachricht zurückgegeben.
         """
         if not topics:
-            return '["manual", "A7iii", "Objektiv", "Kamera", "Sony", "Sony A7", "instruction"]' #"Keine vorgeschlagenen Themen verfügbar."
+            return "Keine vorgeschlagenen Themen verfügbar." #'Diese Themen müssen 1:1 so bleiben! z.B. "manual" und "instruction" anstatt "instruction manual". Hier die Themen: ["manual", "A7iii", "Objektiv", "Kamera", "Sony", "Sony A7", "instruction"]' 
 
         # Entfernt doppelte Themen und sortiert sie alphabetisch
         unique_topics = sorted(set(topic.strip() for topic in topics if topic.strip()))
@@ -322,37 +341,53 @@ class AIHandler:
 
 
     def _format_prompt(self, metadata: Dict, content: Dict) -> str:
-        """Format prompt with metadata and content."""
+        """
+        Format prompt with metadata and enhanced content analysis.
+
+        Args:
+            metadata: Document metadata
+            content: Content and analysis data
+
+        Returns:
+            str: Formatted prompt
+        """
         try:
             # Log input collection
             self.ai_logger.log_input_collection(metadata, content)
-            
-            #"{AI_SETTINGS['min_keywords']} bis "
+
+            # Get analysis results from content
+            analysis = content.get('analysis', {})
+            statistics = analysis.get('statistics', {})
+            word_frequencies = analysis.get('word_frequencies', {})
+
             # Format prompt with detailed sections
             prompt = f"""
-            **Aufgabe:**
-            Extrahiere **{AI_SETTINGS['max_keywords']}** aussagekräftige Tags, die den Inhalt des Dokuments präzise beschreiben. Diese Tags sollen die Hauptthemen und -konzepte erfassen und können auch inferierte Begriffe enthalten, die nicht direkt im Text vorkommen.
-    
-            **Ziel:**
+            # **Aufgabe:**
+            Erstelle mindestens {AI_SETTINGS['min_keywords']} bis idealerweise **{AI_SETTINGS['max_keywords']}** aussagekräftige Tags im JSON-Format, die das Dokument präzise beschreiben. Diese Tags sollen das Wesen, Hauptthemen, Namen und -konzepte erfassen und können auch inferierte Begriffe enthalten, die nicht direkt vorkommen, aber es ideal beschreiben.
+
+            ## **Ziel:**
             Erstellen Sie eine Liste von Tags, die für die Suche und das Verknüpfen ähnlicher Inhalte auf unserer Plattform verwendet werden können.
-    
-            **Vorgehensweise:**
-            - Analysieren Sie die bereitgestellten Metadaten, den Inhalt, die Wortwolkenstatistiken und die vorgeschlagenen Themen.
-            - Identifizieren Sie Schlüsselthemen und -konzepte, die den Kern des Dokuments darstellen.
-            - Schließen Sie relevante Begriffe ein, die das Thema umfassend darstellen, auch wenn sie nicht explizit im Text erwähnt werden.
-            - Vermeiden Sie allgemeine Füllwörter und nicht aussagekräftige Begriffe.
-    
-            **Ausgabeformat:**
-            Bitte geben Sie die Tags als JSON-Array aus, zum Beispiel:
-            [
-                "TAG1",
-                "TAG2",
-                "TAG3",
-                ...
-            ]
-    
-            **Eingaben:**
-    
+
+            ## **Vorgehensweise:**
+            - Analysieren Sie die bereitgestellten Metadaten, den Inhalt und die Wortstatistiken sorgfältig
+            - Beachten Sie besonders Wörter mit hoher TF-IDF-Relevanz
+            - Identifizieren Sie Worte die den Kern des Dokuments darstellen
+            - Schließen Sie relevante Begriffe ein, die das Thema umfassend darstellen, auch wenn sie nicht explizit im Text erwähnt werden
+            - Vermeiden Sie allgemeine Füllwörter und nicht aussagekräftige Begriffe
+
+            ## **ANTWORTEN SIE SO:**
+            A. Ausgeschriebene Überlegung und Analyse, worum es sich bei dem Dokument vermutlich handelt und welche Schlagworte als Tags wichtig wären, um das Dokument bestmöglich und spezifisch zu beschreiben.
+            B. (CRITICAL OUTPUT FORMAT FOR TAGS!) Die Tags ausschließlich als ein zusammenhängendes intaktes JSON mit fortlaufender Nummerierung, zum Beispiel:
+            {{
+              "tags": [
+                {{"index": 1, "tag": "..."}},
+                {{"index": 2, "tag": "..."}}
+              ]
+            }}
+            C. Stoppen Sie nach dem fertigen JSON!
+
+            ## **Eingaben:**
+
             1. **Metadaten:**
             - **Titel:** {metadata.get('title', 'N/A')}
             - **Beschreibung:** {metadata.get('description', 'N/A')}
@@ -362,75 +397,91 @@ class AIHandler:
             - **Anwendungsbereich:** {metadata.get('area_of_application', 'N/A')}
             - **Bibelstellen:** {metadata.get('bible_passage', 'N/A')}
             - **Thumbnail:** {metadata.get('thumbnail', 'N/A')}
-    
+
             2. **Inhalt:**
             {content.get('text', '')}
-    
-            3. **Wortwolkenstatistiken:**
-            - **Gesamtanzahl der Wörter:** {content.get('statistics', {}).get('total_words', 'N/A')}
-            - **Top 200 Wörter nach Häufigkeit:**
-            {self._format_frequencies(content.get('word_frequencies', {}))}
-    
-            4. **Vorgeschlagene Themen:**
+
+            3. **Wortanalyse (Top {MAX_WORDS_FOR_AI} relevante Wörter mit Statistiken):**
+            {self._format_word_frequencies(word_frequencies)}
+
+            4. **Allgemeine Statistiken:**
+            - Gesamtanzahl der Wörter: {statistics.get('processed_words', 'N/A')}
+            - Einzigartige Wörter: {statistics.get('unique_words', 'N/A')}
+            - Durchschnittliche Wortlänge: {statistics.get('average_word_length', 'N/A'):.2f}
+            - Anzahl der Sätze: {content.get('metadata', {}).get('sentence_count', 'N/A')}
+
+            5. **Vorgeschlagene Themen:**
             {self._format_suggested_topics(content.get('suggested_topics', []))}
-    
-            **Hinweise:**
-            - Die Tags sollten thematisch relevant und prägnant sein.
-            - Es sollen nach Möglichkeit Einzelwörter sein
-            - Nur Worte aus den Sprachen, die im Dokument gesprochen werden, oder Namen.
-            - Vermeiden Sie die Verwendung von Füllwörtern wie "und", "aber" sowie Artikeln.
-            - Stellen Sie sicher, dass die Tags die Essenz des Dokuments einfangen, auch wenn bestimmte Begriffe nicht direkt im Text vorkommen.
+
+            ## **Hinweise:**
+            - Die Tags sollen relevant und prägnant sein
+            - Die Tags sollen nach Möglichkeit Einzelwörter sein. Anstelle von Leerzeichen nutzen Sie seperate Tags.
+            - Nur Worte aus den Sprachen, die im Dokument gesprochen werden, oder Namen
+            - Beachten Sie besonders Wörter mit hoher kombinierter Relevanz und TF-IDF-Werten
             """
-    
+
             # Log generated prompt
             self.ai_logger.log_prompt_generation(prompt)
-            
+
             return prompt.strip()
-            
+
         except Exception as e:
             logger.error(f"Prompt formatting error: {str(e)}")
             raise AIError(f"Failed to format prompt: {str(e)}")
 
     def _validate_response(self, response: List[Dict]) -> bool:
         """
-        Validate AI response format and content.
-        
+        Validate AI response format and content with stricter validation.
+    
         Args:
             response: Parsed response to validate
-            
+    
         Returns:
             bool: True if valid
         """
         try:
             if not isinstance(response, list):
+                logger.error("Response is not a list")
                 return False
-                
+    
             if not (AI_SETTINGS['min_keywords'] <= 
                    len(response) <= 
                    AI_SETTINGS['max_keywords']):
+                logger.error(f"Invalid number of keywords: {len(response)}")
                 return False
-                
-            required_fields = {'keyword', 'relevance', 'type'}
-            
+    
+            required_fields = {'tag', 'index'}
+            used_indices = set()
+    
             for item in response:
+                # Check type
+                if not isinstance(item, dict):
+                    logger.error(f"Invalid item type: {type(item)}")
+                    return False
+    
                 # Check required fields
                 if not all(field in item for field in required_fields):
+                    logger.error(f"Missing required fields in item: {item}")
                     return False
-                    
-                # Validate relevance score
-                if not (0 <= item['relevance'] <= 1):
+    
+                # Validate index
+                if not isinstance(item['index'], int) or item['index'] < 1:
+                    logger.error(f"Invalid index in item: {item}")
                     return False
-                    
-                # Validate type
-                if item['type'] not in {'word', 'phrase'}:
+    
+                # Check for duplicate indices
+                if item['index'] in used_indices:
+                    logger.error(f"Duplicate index found: {item['index']}")
                     return False
-                    
-                # Validate keyword
-                if not isinstance(item['keyword'], str) or not item['keyword'].strip():
+                used_indices.add(item['index'])
+    
+                # Validate tag
+                if not isinstance(item['tag'], str) or not item['tag'].strip():
+                    logger.error(f"Invalid tag in item: {item}")
                     return False
-                    
+    
             return True
-            
+    
         except Exception as e:
             logger.error(f"Response validation error: {str(e)}")
             return False
@@ -442,6 +493,7 @@ class AIHandler:
         before=before_log(logger, logging.INFO),
         after=after_log(logger, logging.INFO)
     )
+
     async def _make_ai_request(self, messages: List[Dict]) -> str:
         """Make API request with retry logic."""
         start_time = time.time()
@@ -480,50 +532,6 @@ class AIHandler:
             logger.error(f"AI request failed: {str(e)}")
             raise AIConnectionError(ERROR_MESSAGES['ai_connection_error'])
 
-    def _validate_response(self, response: List[Dict]) -> bool:
-        """
-        Validate AI response format and content.
-        
-        Args:
-            response: Parsed response to validate
-            
-        Returns:
-            bool: True if valid
-        """
-        try:
-            if not isinstance(response, list):
-                return False
-                
-            if not (AI_SETTINGS['min_keywords'] <= 
-                   len(response) <= 
-                   AI_SETTINGS['max_keywords']):
-                return False
-                
-            required_fields = {'keyword', 'relevance', 'type'}
-            
-            for item in response:
-                # Check required fields
-                if not all(field in item for field in required_fields):
-                    return False
-                    
-                # Validate relevance score
-                if not (0 <= item['relevance'] <= 1):
-                    return False
-                    
-                # Validate type
-                if item['type'] not in {'word', 'phrase'}:
-                    return False
-                    
-                # Validate keyword
-                if not isinstance(item['keyword'], str) or not item['keyword'].strip():
-                    return False
-                    
-            return True
-            
-        except Exception as e:
-            logger.error(f"Response validation error: {str(e)}")
-            return False
-
     @retry(
         stop=stop_after_attempt(AI_SETTINGS['retry_attempts']),
         wait=wait_exponential(multiplier=AI_SETTINGS['retry_delay']),
@@ -531,115 +539,105 @@ class AIHandler:
         before=before_log(logger, logging.INFO),
         after=after_log(logger, logging.INFO)
     )
-    async def _make_ai_request(self, messages: List[Dict]) -> str:
-        """Make API request with retry logic."""
-        start_time = time.time()
-        self.request_stats['total_requests'] += 1
-        
-        # Log AI request
-        self.ai_logger.log_ai_request(messages)
-        
-        try:
-            completion = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                stream=False
-            )
-            
-            response = completion.choices[0].message.content
-            
-            # Log AI response
-            self.ai_logger.log_ai_response(response)
-            
-            # Update average response time
-            elapsed = time.time() - start_time
-            prev_avg = self.request_stats['average_response_time']
-            prev_count = self.request_stats['total_requests'] - 1
-            self.request_stats['average_response_time'] = (
-                (prev_avg * prev_count + elapsed) / 
-                self.request_stats['total_requests']
-            )
-            
-            return response
-            
-        except Exception as e:
-            self.request_stats['errors'] += 1
-            logger.error(f"AI request failed: {str(e)}")
-            raise AIConnectionError(ERROR_MESSAGES['ai_connection_error'])
 
-    async def extract_keywords(self,
-                             metadata: Dict,
-                             content: Dict) -> Dict:
+    async def extract_keywords(self, metadata: Dict, content: Dict) -> Dict:
         """
-        Extract keywords with caching and validation.
-        
+        Extract keywords with enhanced content analysis and stricter response parsing.
+        Returns a dictionary with 'tags' instead of 'keywords' for consistency.
+
         Args:
             metadata: Document metadata
             content: Content and analysis data
-            
+
         Returns:
-            Dict: Extraction results
+            Dict: Extraction results including keywords and processing metadata
         """
         start_time = time.time()
-        
+
         try:
             # Generate cache key
             cache_key = self._get_cache_key({
                 'metadata': metadata,
                 'content': content
             })
-            
+
             # Check cache
             cached = await self._get_cached_response(cache_key)
             if cached:
                 self.ai_logger.log_ai_response("Using cached response", cached)
                 return cached
-                
+
             self.request_stats['cache_misses'] += 1
-            
+
             # Format prompt and make request
             prompt = self._format_prompt(metadata, content)
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
             ]
-            
+
             response = await self._make_ai_request(messages)
-            
-            # Parse and validate response
+
+            # Extract JSON part from response using stricter parsing
             try:
-                result = json.loads(response)
-            except json.JSONDecodeError:
-                raise AIResponseError("Invalid JSON response")
-                
+                # Find JSON block
+                json_start = response.find('{\n  "tags":')
+                json_end = response.rfind('}') + 1
+
+                if json_start == -1:
+                    raise AIResponseError("No JSON tags block found")
+
+                json_str = response[json_start:json_end]
+
+                # Parse JSON
+                parsed_data = json.loads(json_str)
+
+                if not isinstance(parsed_data, dict) or 'tags' not in parsed_data:
+                    raise AIResponseError("Invalid JSON structure")
+
+                result = parsed_data['tags']
+
+            except (json.JSONDecodeError, KeyError) as e:
+                raise AIResponseError(f"Invalid JSON response: {str(e)}")
+
             if not self._validate_response(result):
                 raise AIResponseError("Response validation failed")
-                
-            # Prepare final result
+
+            # Sort tags by index
+            result.sort(key=lambda x: x['index'])
+
+            # Prepare final result with metadata
             final_result = {
-                'keywords': result,
+                'tags': result,  # Changed from 'keywords' to 'tags' for consistency
                 'processing_time': time.time() - start_time,
                 'cached': False,
-                'success': True
+                'success': True,
+                'metadata': {
+                    'timestamp': get_timestamp(),
+                    'model': self.model,
+                    'temperature': self.temperature
+                }
             }
-            
+
             # Log final parsed result
             self.ai_logger.log_ai_response(response, final_result)
-            
+
             # Cache result
             self._cache_response(cache_key, final_result)
-            
+
             return final_result
-            
+
         except Exception as e:
             logger.error(f"Keyword extraction failed: {str(e)}")
             return {
-                'keywords': [],
+                'tags': [],  # Changed from 'keywords' to 'tags' for consistency
                 'processing_time': time.time() - start_time,
                 'error': str(e),
-                'success': False
+                'success': False,
+                'metadata': {
+                    'timestamp': get_timestamp(),
+                    'error_type': type(e).__name__
+                }
             }
 
     def get_stats(self) -> Dict:
