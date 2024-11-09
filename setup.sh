@@ -73,7 +73,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     pip install --upgrade certifi
 fi
 
-# Create requirements.txt with updated dependencies
+# Create requirements.txt with dependencies (removed test dependencies)
 echo -e "${BLUE}Creating requirements.txt...${NC}"
 cat > requirements.txt << EOL
 # Core dependencies
@@ -86,7 +86,7 @@ PyPDF2>=3.0.0
 langdetect>=1.0.9
 
 # Text processing
-nltk==3.8.1  # Spezifische Version für bessere Kompatibilität
+nltk==3.8.1
 matplotlib>=3.0.0
 wordcloud>=1.9.0
 

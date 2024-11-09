@@ -37,7 +37,6 @@ nltk_data/
 .env.backup
 setup_nltk.py
 requirements.txt
-tests/
 
 # IDE
 .idea/
