@@ -1,282 +1,464 @@
 # gui/app_window.py
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-from pathlib import Path
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QFileDialog, QComboBox, QLineEdit,
+    QProgressBar, QTextEdit, QScrollArea, QFrame
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont, QPalette, QColor
 import asyncio
-import queue
-import threading
-from typing import Dict, Optional, Callable
+from pathlib import Path
+from typing import Dict, Optional
 import logging
+import queue
 
 logger = logging.getLogger(__name__)
 
-class AppWindow:
-    """Main application window handler."""
-    def __init__(self, process_callback: Callable, supported_languages: list, default_metadata: dict):
-        """
-        Initialize the application window.
+class AsyncWorker(QThread):
+    """Asynchronous worker thread for document processing."""
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+    progress = pyqtSignal(dict)
+    
+    def __init__(self, process_func, pdf_path, metadata, language):
+        super().__init__()
+        self.process_func = process_func
+        self.pdf_path = pdf_path
+        self.metadata = metadata
+        self.language = language
+        self.loop = None
         
-        Args:
-            process_callback: Callback function for document processing
-            supported_languages: List of supported languages
-            default_metadata: Default metadata dictionary
-        """
+    def run(self):
+        """Execute the processing function in a separate thread."""
+        try:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+            
+            # Create a queue for progress updates
+            progress_queue = asyncio.Queue()
+            
+            # Run the processing function and handle messages
+            async def process_and_handle_messages():
+                try:
+                    # Process messages from the queue continuously
+                    async def message_handler():
+                        while True:
+                            try:
+                                message = await progress_queue.get()
+                                self.progress.emit(message)
+                            except Exception as e:
+                                logger.error(f"Error handling message: {str(e)}")
+                                break
+
+                    # Start message handler task
+                    message_handler_task = asyncio.create_task(message_handler())
+                    
+                    # Run the main processing function
+                    await self.process_func(
+                        self.pdf_path,
+                        self.metadata,
+                        self.language,
+                        progress_queue
+                    )
+                    
+                    # Allow time for final messages to be processed
+                    await asyncio.sleep(0.1)
+                    
+                    # Cancel message handler
+                    message_handler_task.cancel()
+                    try:
+                        await message_handler_task
+                    except asyncio.CancelledError:
+                        pass
+                        
+                except Exception as e:
+                    logger.error(f"Processing error: {str(e)}")
+                    self.error.emit(str(e))
+
+            self.loop.run_until_complete(process_and_handle_messages())
+            self.finished.emit()
+            
+        except Exception as e:
+            logger.error(f"Worker thread error: {str(e)}")
+            self.error.emit(str(e))
+        finally:
+            if self.loop:
+                self.loop.close()
+
+class AppWindow(QMainWindow):
+    """Modern macOS-styled main window."""
+    
+    def __init__(self, process_callback, supported_languages, default_metadata):
+        super().__init__()
         self.process_callback = process_callback
         self.supported_languages = supported_languages
         self.default_metadata = default_metadata
-        
-        self.pdf_path: Optional[Path] = None
-        self.processing = False
+        self.pdf_path = None
+        self.worker = None
         self.message_queue = queue.Queue()
         
-        # Initialize main window
-        self.root = tk.Tk()
-        self.setup_window()
-        self.create_ui()
+        self.init_ui()
         
-        # Start UI update loop
-        self.schedule_ui_updates()
+    def init_ui(self):
+        """Initialize the user interface with modern macOS styling."""
+        self.setWindowTitle("Document Analyzer")
+        self.setMinimumSize(900, 700)
         
-    def setup_window(self):
-        """Configure the main window properties."""
-        self.root.title("Keyword Extraction System")
-        self.root.geometry("900x700")
+        # Create main widget and layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QVBoxLayout(main_widget)
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
         
-        # Configure window appearance
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
+        # Set modern styling
+        self.setup_styling()
         
-        # Set window style
-        self.style = ttk.Style()
-        self.style.configure('Header.TLabel', font=('Helvetica', 12, 'bold'))
-        self.style.configure('Status.TLabel', font=('Helvetica', 10))
+        # Create UI sections
+        self.create_file_section(layout)
+        self.create_metadata_section(layout)
+        self.create_processing_section(layout)
+        self.create_results_section(layout)
         
-        # Ensure window appears on top when launched
-        self.root.focus_force()
+        # Initialize status bar
+        self.statusBar().showMessage("Ready")
         
-    def create_ui(self):
-        """Create all UI elements."""
-        self.main_frame = ttk.Frame(self.root, padding="10")
-        self.main_frame.grid(row=0, column=0, sticky="nsew")
+        # Setup periodic UI updates
+        self.update_timer = QTimer(self)
+        self.update_timer.timeout.connect(self.update_ui)
+        self.update_timer.start(50)  # 50ms interval
         
-        self._create_file_section()
-        self._create_metadata_section()
-        self._create_processing_section()
-        self._create_results_section()
-        self._create_status_bar()
+    def setup_styling(self):
+        """Apply modern macOS-like styling."""
+        # Set font
+        font = QFont(".AppleSystemUIFont", 13)
+        QApplication.setFont(font)
         
-    def _create_file_section(self):
+        # Set color scheme
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.Window, QColor(255, 255, 255))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(0, 0, 0))
+        palette.setColor(QPalette.ColorRole.Base, QColor(249, 249, 249))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(245, 245, 245))
+        palette.setColor(QPalette.ColorRole.Button, QColor(240, 240, 240))
+        self.setPalette(palette)
+        
+        # Set stylesheet for modern look
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #FFFFFF;
+            }
+            QPushButton {
+                background-color: #007AFF;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #0069D9;
+            }
+            QPushButton:pressed {
+                background-color: #0062CC;
+            }
+            QProgressBar {
+                border: none;
+                border-radius: 4px;
+                background-color: #F0F0F0;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #007AFF;
+                border-radius: 4px;
+            }
+            QLineEdit, QComboBox {
+                padding: 6px;
+                border: 1px solid #E0E0E0;
+                border-radius: 6px;
+                background-color: white;
+            }
+            QTextEdit {
+                border: 1px solid #E0E0E0;
+                border-radius: 6px;
+                background-color: white;
+                padding: 8px;
+            }
+        """)
+        
+    def create_file_section(self, parent_layout):
         """Create file selection section."""
-        file_frame = ttk.LabelFrame(self.main_frame, text="Document Selection", padding="5")
-        file_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=5)
+        frame = QFrame()
+        frame.setFrameStyle(QFrame.Shape.StyledPanel)
+        layout = QVBoxLayout(frame)
         
         # File selection
-        ttk.Label(file_frame, text="PDF File:").grid(row=0, column=0, sticky="w")
-        self.file_label = ttk.Label(file_frame, text="No file selected")
-        self.file_label.grid(row=0, column=1, sticky="w", padx=5)
-        
-        ttk.Button(
-            file_frame,
-            text="Browse",
-            command=self._select_file
-        ).grid(row=0, column=2, padx=5)
+        file_layout = QHBoxLayout()
+        self.file_label = QLabel("No file selected")
+        browse_button = QPushButton("Choose PDF")
+        browse_button.clicked.connect(self.select_file)
+        file_layout.addWidget(QLabel("PDF File:"))
+        file_layout.addWidget(self.file_label, 1)
+        file_layout.addWidget(browse_button)
         
         # Language selection
-        ttk.Label(file_frame, text="Language:").grid(row=1, column=0, sticky="w")
-        self.language_var = tk.StringVar(value=self.supported_languages[0])
-        language_combo = ttk.Combobox(
-            file_frame,
-            textvariable=self.language_var,
-            values=self.supported_languages,
-            state="readonly"
-        )
-        language_combo.grid(row=1, column=1, sticky="w", padx=5, pady=5)
+        lang_layout = QHBoxLayout()
+        self.language_combo = QComboBox()
+        self.language_combo.addItems(self.supported_languages)
+        lang_layout.addWidget(QLabel("Language:"))
+        lang_layout.addWidget(self.language_combo, 1)
         
-    def _create_metadata_section(self):
+        layout.addLayout(file_layout)
+        layout.addLayout(lang_layout)
+        parent_layout.addWidget(frame)
+        
+    def create_metadata_section(self, parent_layout):
         """Create metadata input section."""
-        metadata_frame = ttk.LabelFrame(self.main_frame, text="Document Metadata", padding="5")
-        metadata_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=5)
+        frame = QFrame()
+        frame.setFrameStyle(QFrame.Shape.StyledPanel)
+        layout = QVBoxLayout(frame)
         
         self.metadata_entries = {}
-        for idx, (field, default_value) in enumerate(self.default_metadata.items()):
-            label = field.replace('_', ' ').title()
-            ttk.Label(metadata_frame, text=f"{label}:").grid(
-                row=idx, column=0, sticky="w", padx=5, pady=2
-            )
-            
-            entry = ttk.Entry(metadata_frame, width=50)
-            entry.grid(row=idx, column=1, sticky="ew", padx=5, pady=2)
-            self.metadata_entries[field] = entry
+        for field, default_value in self.default_metadata.items():
+            field_layout = QHBoxLayout()
+            label = QLabel(field.replace('_', ' ').title())
+            entry = QLineEdit()
             
             if isinstance(default_value, list):
-                entry.insert(0, ', '.join(default_value))
+                entry.setText(', '.join(default_value))
             else:
-                entry.insert(0, str(default_value))
+                entry.setText(str(default_value))
                 
-    def _create_processing_section(self):
+            self.metadata_entries[field] = entry
+            field_layout.addWidget(label)
+            field_layout.addWidget(entry)
+            layout.addLayout(field_layout)
+            
+        parent_layout.addWidget(frame)
+        
+    def create_processing_section(self, parent_layout):
         """Create processing controls section."""
-        processing_frame = ttk.Frame(self.main_frame)
-        processing_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        layout = QHBoxLayout()
         
-        self.process_button = ttk.Button(
-            processing_frame,
-            text="Extract Keywords",
-            command=self._start_processing
-        )
-        self.process_button.pack(pady=5)
+        self.process_button = QPushButton("Process Document")
+        self.process_button.clicked.connect(self.start_processing)
+        self.process_button.setFixedHeight(40)
         
-        self.progress = ttk.Progressbar(
-            processing_frame,
-            mode='indeterminate',
-            length=400
-        )
-        self.progress.pack(pady=5)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setTextVisible(False)
         
-    def _create_results_section(self):
-        """Create results display section."""
-        results_frame = ttk.LabelFrame(self.main_frame, text="Results", padding="5")
-        results_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=5)
+        layout.addWidget(self.process_button)
+        layout.addWidget(self.progress_bar)
+        parent_layout.addLayout(layout)
         
-        # Make results section expandable
-        results_frame.columnconfigure(0, weight=1)
-        results_frame.rowconfigure(0, weight=1)
+    def create_results_section(self, parent_layout):
+        """Create results display section with optimized text widget."""
+        from PyQt6.QtWidgets import QPlainTextEdit  # Add this import at the top of your file
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameStyle(QFrame.Shape.NoFrame)
+
+        # Use QPlainTextEdit instead of QTextEdit for better performance
+        self.results_text = QPlainTextEdit()
+        self.results_text.setReadOnly(True)
+        self.results_text.setMaximumBlockCount(10000)
+
+        # Set a reasonable maximum size to prevent memory issues
+        self.results_text.setMaximumHeight(2000)
+
+        # Optimize text widget
+        self.results_text.setUndoRedoEnabled(False)
+
+        scroll.setWidget(self.results_text)
+        parent_layout.addWidget(scroll, 1)
         
-        # Create text widget with scrollbar
-        self.results_text = tk.Text(
-            results_frame,
-            height=15,
-            width=70,
-            wrap=tk.WORD
-        )
-        self.results_text.grid(row=0, column=0, sticky="nsew")
-        
-        scrollbar = ttk.Scrollbar(
-            results_frame,
-            orient="vertical",
-            command=self.results_text.yview
-        )
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.results_text['yscrollcommand'] = scrollbar.set
-        
-    def _create_status_bar(self):
-        """Create status bar."""
-        self.status_var = tk.StringVar(value="Ready")
-        self.status_bar = ttk.Label(
-            self.root,
-            textvariable=self.status_var,
-            style='Status.TLabel'
-        )
-        self.status_bar.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
-        
-    def _select_file(self):
+    def select_file(self):
         """Handle file selection."""
-        file_path = filedialog.askopenfilename(
-            filetypes=[("PDF files", "*.pdf")]
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select PDF Document",
+            str(Path.home()),
+            "PDF Files (*.pdf)"
         )
+        
         if file_path:
             self.pdf_path = Path(file_path)
-            self.file_label.config(text=self.pdf_path.name)
+            self.file_label.setText(self.pdf_path.name)
             
     def get_metadata(self) -> Dict:
         """Collect metadata from input fields."""
         metadata = {}
         for field, entry in self.metadata_entries.items():
-            value = entry.get().strip()
+            value = entry.text().strip()
             if isinstance(self.default_metadata[field], list):
                 metadata[field] = [v.strip() for v in value.split(',') if v.strip()]
             else:
                 metadata[field] = value
         return metadata
         
-    def _validate_inputs(self) -> bool:
-        """Validate user inputs."""
-        if not self.pdf_path:
-            messagebox.showerror("Error", "Please select a PDF file")
-            return False
-            
-        if not self.pdf_path.exists():
-            messagebox.showerror("Error", "Selected file no longer exists")
-            return False
-            
-        return True
-        
-    def _start_processing(self):
+    def start_processing(self):
         """Start document processing."""
-        if not self.pdf_path or self.processing:
+        if not self.pdf_path or self.worker is not None:
             return
             
-        if not self._validate_inputs():
-            return
-            
-        self.processing = True
-        self.message_queue.put({'action': 'disable_button'})
-        self.progress.start()
+        self.process_button.setEnabled(False)
+        self.progress_bar.setRange(0, 0)  # Indeterminate progress
         
-        # Create processing thread using asyncio
-        async def process_wrapper():
-            try:
-                await self.process_callback(
-                    self.pdf_path,
-                    self.get_metadata(),
-                    self.language_var.get(),
-                    self.message_queue
-                )
-            except Exception as e:
-                logger.error(f"Processing error: {str(e)}")
-                self.message_queue.put({
-                    'action': 'show_error',
-                    'text': f"Processing error: {str(e)}"
-                })
-            finally:
-                self.processing = False
-                self.message_queue.put({'action': 'enable_button'})
-                self.message_queue.put({'action': 'stop_progress'})
+        # Create and start worker thread
+        self.worker = AsyncWorker(
+            self.process_callback,
+            self.pdf_path,
+            self.get_metadata(),
+            self.language_combo.currentText()
+        )
+        
+        self.worker.finished.connect(self.processing_finished)
+        self.worker.error.connect(self.processing_error)
+        self.worker.progress.connect(self.update_progress)
+        self.worker.start()
+        
+    def processing_finished(self):
+        """Handle processing completion."""
+        try:
+            # Update UI before cleanup
+            self.statusBar().showMessage("Processing complete")
+            QApplication.processEvents()
+            
+            # Clean up worker
+            self.cleanup_worker()
+            
+            logger.debug("Processing finished successfully")
+            
+        except Exception as e:
+            logger.error(f"Error in processing_finished: {str(e)}")
+            self.processing_error(str(e))
+        
+    def processing_error(self, error_msg):
+        """Handle processing errors."""
+        try:
+            logger.debug(f"Processing error occurred: {error_msg}")
+            self.cleanup_worker()
+            self.statusBar().showMessage("Error occurred")
+
+            # Use appendPlainText instead of append for QPlainTextEdit
+            if hasattr(self, 'results_text'):
+                self.results_text.appendPlainText(f"Error: {error_msg}\n")
+
+                # Move cursor to end
+                cursor = self.results_text.textCursor()
+                cursor.movePosition(cursor.MoveOperation.End)
+                self.results_text.setTextCursor(cursor)
+
+        except Exception as e:
+            logger.error(f"Error in processing_error handler: {str(e)}", exc_info=True)
+        
+    def update_progress(self, progress_data):
+        """Update UI with progress information."""
+        try:
+            if not isinstance(progress_data, dict):
+                logger.error(f"Invalid progress_data type: {type(progress_data)}")
+                return
                 
-        threading.Thread(
-            target=lambda: asyncio.run(process_wrapper()),
-            daemon=True
-        ).start()
-        
-    def schedule_ui_updates(self):
-        """Schedule periodic UI updates."""
-        def update():
-            try:
-                while True:
-                    message = self.message_queue.get_nowait()
-                    self._handle_ui_message(message)
-            except queue.Empty:
-                pass
-            finally:
-                # Schedule next update using a shorter interval for better responsiveness
-                if self.root:
-                    self.root.after(50, update)
+            action = progress_data.get('action')
+            text = progress_data.get('text', '')
+            
+            if not action:
+                logger.error("No action specified in progress_data")
+                return
+                
+            if action == 'update_results':
+                if hasattr(self, 'results_text'):
+                    try:
+                        # Use appendPlainText for QPlainTextEdit
+                        self.results_text.appendPlainText(str(text))
+                        
+                        # Move cursor to end
+                        cursor = self.results_text.textCursor()
+                        cursor.movePosition(cursor.MoveOperation.End)
+                        self.results_text.setTextCursor(cursor)
+                        
+                        # Process events
+                        QApplication.processEvents()
+                        
+                    except Exception as e:
+                        logger.error(f"Error updating text widget: {str(e)}", exc_info=True)
+                        
+            elif action == 'set_status':
+                try:
+                    self.statusBar().showMessage(str(text))
+                except Exception as e:
+                    logger.error(f"Error updating status bar: {str(e)}", exc_info=True)
                     
-        # Start the update loop
-        self.root.after(50, update)
+        except Exception as e:
+            logger.error(f"Critical error in update_progress: {str(e)}", exc_info=True)
+            
+    def cleanup_worker(self):
+        """Clean up worker thread and resources."""
+        if self.worker:
+            try:
+                # Set a flag to stop processing
+                self.worker.finished.disconnect()
+                self.worker.error.disconnect()
+                self.worker.progress.disconnect()
+                
+                if self.worker.loop and self.worker.loop.is_running():
+                    self.worker.loop.stop()
+                
+                self.worker.quit()
+                if not self.worker.wait(3000):  # 3 second timeout
+                    logger.warning("Worker thread did not finish, forcing termination")
+                    self.worker.terminate()
+                    self.worker.wait()
+                    
+            except Exception as e:
+                logger.error(f"Error during worker cleanup: {str(e)}")
+            finally:
+                self.worker = None
+                self.process_button.setEnabled(True)
+                self.progress_bar.setRange(0, 100)
+                self.progress_bar.setValue(100)
         
+    def update_ui(self):
+        """Periodic UI updates."""
+        try:
+            while True:
+                message = self.message_queue.get_nowait()
+                self._handle_ui_message(message)
+        except queue.Empty:
+            pass
+            
     def _handle_ui_message(self, message: Dict):
         """Handle UI update messages."""
-        action = message.get('action')
-        
-        if action == 'set_status':
-            self.status_var.set(message['text'])
-        elif action == 'update_results':
-            self.results_text.delete('1.0', tk.END)
-            self.results_text.insert(tk.END, message['text'])
-        elif action == 'enable_button':
-            self.process_button.state(['!disabled'])
-        elif action == 'disable_button':
-            self.process_button.state(['disabled'])
-        elif action == 'stop_progress':
-            self.progress.stop()
-        elif action == 'show_error':
-            messagebox.showerror("Error", message['text'])
+        try:
+            action = message.get('action')
+            
+            if action == 'set_status':
+                self.statusBar().showMessage(message['text'])
+            elif action == 'update_results':
+                # Ensure text widget exists and is accessible
+                if hasattr(self, 'results_text'):
+                    self.results_text.append(message['text'])
+                    # Force processing of UI events
+                    QApplication.processEvents()
+            elif action == 'show_error':
+                if hasattr(self, 'results_text'):
+                    self.results_text.append(f"Error: {message['text']}")
+                    QApplication.processEvents()
+        except Exception as e:
+            logger.error(f"Error handling UI message: {str(e)}")
             
     def run(self):
-        """Start the main event loop."""
-        try:
-            self.root.mainloop()
-        except Exception as e:
-            logger.critical(f"Application crash: {str(e)}")
-            messagebox.showerror("Critical Error", f"Application crashed: {str(e)}")
-            raise
+        """Show the window."""
+        self.show()
+
+# Only needed if running this file directly
+if __name__ == '__main__':
+    import sys
+    
+    app = QApplication(sys.argv)
+    window = AppWindow(lambda: None, ['en', 'de'], {'field1': 'default'})
+    window.run()
+    sys.exit(app.exec())

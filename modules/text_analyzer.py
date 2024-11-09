@@ -27,6 +27,11 @@ from nltk.collocations import BigramAssocMeasures, BigramCollocationFinder
 from nltk.collocations import TrigramAssocMeasures, TrigramCollocationFinder
 from nltk.stem import WordNetLemmatizer, SnowballStemmer
 from wordcloud import WordCloud
+
+# Konfiguriere matplotlib für nicht-interaktiven Modus
+import matplotlib
+matplotlib.use('Agg')  # Wichtig: Muss vor plt import sein
+
 import matplotlib.pyplot as plt
 
 # Project imports remain the same
@@ -474,41 +479,23 @@ class TextAnalyzer:
     def generate_wordcloud(self, 
                           scores: Dict[str, float],
                           output_path: Optional[Path] = None) -> str:
-        """
-        Generate word cloud visualization.
-        """
+        """Generate word cloud with proper resource management."""
         if not scores:
-            logger.error("Empty scores dictionary provided to generate_wordcloud")
             raise TextAnalysisError("No scores provided for word cloud generation")
-        
-        logger.debug(f"Generating wordcloud with {len(scores)} words")
-            
+        fig = None
         try:
             if output_path is None:
                 timestamp = get_timestamp()
                 output_path = OUTPUT_DIR / f'wordcloud_{self.language}_{timestamp}.png'
-                
-            # Ensure output directory exists
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Convert scores to frequency format expected by WordCloud
+            # Convert scores to frequency format
             if isinstance(next(iter(scores.values())), dict):
-                # If scores contain detailed statistics, use combined scores
                 wordcloud_scores = {
                     word: stats['combined_score'] 
                     for word, stats in scores.items()
-                    if isinstance(stats, dict) and 'combined_score' in stats
                 }
             else:
-                # If scores are already simple word->value mapping, use as is
                 wordcloud_scores = scores
-                
-            if not wordcloud_scores:
-                logger.error("No valid scores after conversion for wordcloud")
-                raise TextAnalysisError("No valid scores for word cloud generation")
-                
-            logger.debug(f"Wordcloud scores count after conversion: {len(wordcloud_scores)}")
-            
             # Create word cloud
             wordcloud = WordCloud(
                 width=1600,
@@ -519,33 +506,33 @@ class TextAnalyzer:
                 prefer_horizontal=0.7,
                 collocations=True
             ).generate_from_frequencies(wordcloud_scores)
-            
-            # Save visualization
-            plt.figure(figsize=(20, 10), facecolor='none')
+            # Create figure without display
+            plt.ioff()
+            fig = plt.figure(figsize=(20, 10), facecolor='none')
             plt.imshow(wordcloud, interpolation='bilinear')
             plt.axis('off')
+            # Save and close
             plt.savefig(output_path, bbox_inches='tight', pad_inches=0)
-            plt.close()
-            
             return str(output_path)
-            
         except Exception as e:
             logger.error(f"Word cloud generation error: {str(e)}")
             raise TextAnalysisError(f"Word cloud generation failed: {str(e)}")
+        finally:
+            # Ensure resources are cleaned up
+            if fig:
+                plt.close(fig)
+            plt.close('all')
 
-    def analyze_text(self, text: str) -> Dict:
+    def analyze_text(self, text: str, generate_wordcloud: bool = False) -> Dict:
         """
         Perform comprehensive text analysis with enhanced word selection.
 
         Args:
             text: Text to analyze
+            generate_wordcloud: Whether to generate wordcloud (default: False)
 
         Returns:
-            Dict: Analysis results including:
-                - word_frequencies: Dict with word stats (frequency, TF-IDF, combined score)
-                - phrases: Extracted meaningful phrases
-                - statistics: Various text statistics
-                - raw_frequencies: Original word frequencies (for reference)
+            Dict: Analysis results
         """
         if not text:
             raise TextAnalysisError("Empty text provided for analysis")
@@ -577,11 +564,11 @@ class TextAnalyzer:
                         valid_words.append(normalized)
                         total_length += len(normalized)
 
-            # Sort word frequencies by count (descending) and then alphabetically
+            # Sort word frequencies
             sorted_frequencies = dict(
                 sorted(
                     word_freq.items(),
-                    key=lambda x: (-x[1], x[0])  # Sort by frequency desc, then word asc
+                    key=lambda x: (-x[1], x[0])
                 )
             )
 
@@ -605,20 +592,21 @@ class TextAnalyzer:
             # Get most relevant words using combined scoring
             top_words = self._get_top_words(sorted_frequencies, tfidf_scores)
 
-            # Generate word cloud using combined scores
+            # Generate word cloud only if requested
             wordcloud_path = None
-            try:
-                wordcloud_path = self.generate_wordcloud(top_words)
-            except Exception as e:
-                logger.warning(f"Word cloud generation failed: {str(e)}")
-                self.stats['warnings'].append(f"Word cloud generation failed: {str(e)}")
+            if generate_wordcloud:
+                try:
+                    wordcloud_path = self.generate_wordcloud(top_words)
+                except Exception as e:
+                    logger.warning(f"Word cloud generation failed: {str(e)}")
+                    self.stats['warnings'].append(f"Word cloud generation failed: {str(e)}")
 
-            # Combine results with both processed and raw data
+            # Combine results
             results = {
-                'word_frequencies': top_words,  # Contains frequency, TF-IDF, and combined scores
+                'word_frequencies': top_words,
                 'phrases': dict(phrases),
                 'statistics': self.stats.copy(),
-                'raw_frequencies': sorted_frequencies,  # Keep original frequencies for reference
+                'raw_frequencies': sorted_frequencies,
                 'metadata': {
                     'language': self.language,
                     'timestamp': get_timestamp(),
@@ -638,65 +626,6 @@ class TextAnalyzer:
         except Exception as e:
             logger.error(f"Text analysis error: {str(e)}")
             raise TextAnalysisError(f"Analysis failed: {str(e)}")
-
-    def generate_wordcloud(self, 
-                          scores: Dict[str, float],
-                          output_path: Optional[Path] = None) -> str:
-        """
-        Generate word cloud visualization.
-
-        Args:
-            scores: Word scores (can be frequencies, TF-IDF, or combined scores)
-            output_path: Optional custom output path
-
-        Returns:
-            str: Path to generated word cloud
-        """
-        if not scores:
-            raise TextAnalysisError("No scores provided for word cloud generation")
-
-        try:
-            if output_path is None:
-                timestamp = get_timestamp()
-                output_path = OUTPUT_DIR / f'wordcloud_{self.language}_{timestamp}.png'
-
-            # Ensure output directory exists
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Convert scores to frequency format expected by WordCloud
-            if isinstance(next(iter(scores.values())), dict):
-                # If scores contain detailed statistics, use combined scores
-                wordcloud_scores = {
-                    word: stats['combined_score'] 
-                    for word, stats in scores.items()
-                }
-            else:
-                # If scores are already simple word->value mapping, use as is
-                wordcloud_scores = scores
-
-            # Create word cloud
-            wordcloud = WordCloud(
-                width=1600,
-                height=800,
-                background_color='white',
-                max_words=MAX_WORDS_WORDCLOUD,
-                min_font_size=10,
-                prefer_horizontal=0.7,
-                collocations=True
-            ).generate_from_frequencies(wordcloud_scores)
-
-            # Save visualization
-            plt.figure(figsize=(20, 10), facecolor='none')
-            plt.imshow(wordcloud, interpolation='bilinear')
-            plt.axis('off')
-            plt.savefig(output_path, bbox_inches='tight', pad_inches=0)
-            plt.close()
-
-            return str(output_path)
-
-        except Exception as e:
-            logger.error(f"Word cloud generation error: {str(e)}")
-            raise TextAnalysisError(f"Word cloud generation failed: {str(e)}")
 
 
 if __name__ == "__main__":
