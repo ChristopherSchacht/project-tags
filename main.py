@@ -45,7 +45,7 @@ class KeywordExtractor:
         if self.processing:
             await message_queue.put({'action': 'update_results', 'text': "Processing already in progress\n"})
             return
-    
+        
         self.processing = True
         analyzer = None
         
@@ -53,7 +53,10 @@ class KeywordExtractor:
             # Process PDF
             logger.debug("Starting PDF processing...")
             await message_queue.put({'action': 'set_status', 'text': "Processing document..."})
-            await message_queue.put({'action': 'update_results', 'text': "Reading PDF...\n"})
+            await message_queue.put({
+                'action': 'update_results', 
+                'text': "\n█ Reading PDF...\n"
+            })
             
             # PDF Processor handles its own cleanup in extract_text
             pdf_processor = PDFProcessor(pdf_path)
@@ -70,18 +73,24 @@ class KeywordExtractor:
                     logger.warning(f"PDF Processing warning: {warning}")
                     await message_queue.put({
                         'action': 'update_results',
-                        'text': f"Warning: {warning}\n"
+                        'text': f"⚠️  Warning: {warning}\n"
                     })
             
             # Analyze text
-            await message_queue.put({'action': 'update_results', 'text': "Analyzing text...\n"})
+            await message_queue.put({
+                'action': 'update_results', 
+                'text': "\n█ Analyzing text...\n"
+            })
             analyzer = TextAnalyzer(language=language)
             analysis_results = analyzer.analyze_text(text, generate_wordcloud=False)
             
             logger.debug("Text analysis complete")
             
             # Extract keywords using AI
-            await message_queue.put({'action': 'update_results', 'text': "Extracting keywords...\n"})
+            await message_queue.put({
+                'action': 'update_results', 
+                'text': "\n█ Extracting keywords...\n"
+            })
             
             # Get max text length from settings
             max_chars = AI_SETTINGS.get('max_text_chars', 100000)
@@ -90,7 +99,7 @@ class KeywordExtractor:
                 logger.warning(f"Text truncated from {len(text)} to {max_chars} characters")
                 await message_queue.put({
                     'action': 'update_results',
-                    'text': "Notice: Text was truncated due to length limits\n"
+                    'text': "⚠️  Notice: Text was truncated due to length limits\n"
                 })
             
             logger.debug("Calling AI handler...")
@@ -121,31 +130,51 @@ class KeywordExtractor:
             output_path = OUTPUT_DIR / f'results_{timestamp}.json'
             safe_file_write(results, output_path)
             
-            # Display results
-            await message_queue.put({'action': 'update_results', 'text': "Processing complete!\n\n"})
-            await message_queue.put({'action': 'update_results', 'text': "Extracted Keywords:\n"})
+            # Display results with improved formatting
+            await message_queue.put({
+                'action': 'update_results', 
+                'text': "\n" + "="*50 + "\n✨ Processing complete!\n" + "="*50 + "\n\n"
+            })
             
-            for kw in keywords_result.get('keywords', []):
-                if isinstance(kw, dict) and 'keyword' in kw:
-                    keyword = str(kw.get('keyword', '')).strip()
-                    if keyword:
-                        await message_queue.put({
-                            'action': 'update_results',
-                            'text': f"• {keyword}\n"
-                        })
-                        await asyncio.sleep(0.01)
+            # Display keywords in a visually distinct way
+            await message_queue.put({
+                'action': 'update_results', 
+                'text': "📑 EXTRACTED KEYWORDS:\n" + "-"*30 + "\n\n"
+            })
             
+            # Get keywords and calculate spacing
+            keywords = keywords_result.get('keywords', [])
+            max_length = max(len(str(kw.get('keyword', ''))) for kw in keywords if isinstance(kw, dict)) if keywords else 0
+            
+            # Display keywords in rows of 7
+            words_per_row = 7
+            for i in range(0, len(keywords), words_per_row):
+                # Get up to 7 keywords for this row
+                row_keywords = keywords[i:i + words_per_row]
+                
+                # Format each keyword in the row
+                row_items = [f"   •  {str(kw.get('keyword', '')).strip():<{max_length}}" for kw in row_keywords]
+                line = "".join(row_items)
+                
+                await message_queue.put({
+                    'action': 'update_results',
+                    'text': line + "\n"
+                })
+                await asyncio.sleep(0.01)
+            
+            # Display save location
             await message_queue.put({
                 'action': 'update_results',
-                'text': f"\nResults saved to: {output_path}\n"
+                'text': f"\n{'='*50}\n📁 Results saved to:\n{output_path}\n{'='*50}\n"
             })
+            
             await message_queue.put({'action': 'set_status', 'text': "Processing complete"})
             
         except Exception as e:
             logger.error(f"Processing error: {str(e)}", exc_info=True)
             await message_queue.put({
                 'action': 'update_results',
-                'text': f"Error during processing: {str(e)}\n"
+                'text': f"❌ Error during processing: {str(e)}\n"
             })
             raise
         finally:
