@@ -51,11 +51,11 @@ AI_SETTINGS = {
     "temperature": 0.7,
     "max_tokens": 500,
     "min_keywords": 3,
-    "max_keywords": 20,
+    "max_keywords": 50,
     "request_timeout": 60,
     "retry_attempts": 3,
     "retry_delay": 2,
-    "max_text_chars": 18000
+    "max_text_chars": 50000
 }
 
 # Metadata template

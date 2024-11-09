@@ -297,6 +297,29 @@ class AIHandler:
             f"- {phrase}: {score:.3f}"
             for phrase, score in phrases.items()
         )
+    
+    def _format_suggested_topics(self, topics: List[str]) -> str:
+        """
+        Formatiert die vorgeschlagenen Themen für den Prompt.
+
+        Args:
+            topics (List[str]): Eine Liste von vorgeschlagenen Themen.
+
+        Returns:
+            str: Ein formatierter String der Themen, jeweils vorangestellt mit einem Bindestrich.
+                 Falls keine Themen vorhanden sind, wird eine entsprechende Nachricht zurückgegeben.
+        """
+        if not topics:
+            return '["manual", "A7iii", "Objektiv", "Kamera", "Sony", "Sony A7", "instruction"]' #"Keine vorgeschlagenen Themen verfügbar."
+
+        # Entfernt doppelte Themen und sortiert sie alphabetisch
+        unique_topics = sorted(set(topic.strip() for topic in topics if topic.strip()))
+
+        # Formatiert jedes Thema mit einem Bindestrich und einem Leerzeichen
+        formatted_topics = "\n".join(f"- {topic}" for topic in unique_topics)
+
+        return formatted_topics
+
 
     def _format_prompt(self, metadata: Dict, content: Dict) -> str:
         """Format prompt with metadata and content."""
@@ -304,35 +327,61 @@ class AIHandler:
             # Log input collection
             self.ai_logger.log_input_collection(metadata, content)
             
+            #"{AI_SETTINGS['min_keywords']} bis "
             # Format prompt with detailed sections
             prompt = f"""
-            Task: Extract {AI_SETTINGS['min_keywords']}-{AI_SETTINGS['max_keywords']} 
-            keywords from the provided content.
-
-            Document Metadata:
-            - Title: {metadata.get('title', 'N/A')}
-            - Description: {metadata.get('description', 'N/A')}
-            - Category: {metadata.get('category', 'N/A')}
-            - Target Audience: {metadata.get('target_age_group', 'N/A')}
-            - Application Area: {metadata.get('area_of_application', 'N/A')}
-
-            Content Statistics:
-            {self._format_stats(content.get('statistics', {}))}
-
-            Top Words by Frequency:
-            {self._format_frequencies(content.get('word_frequencies', {}))}
-
-            Key Phrases:
-            {self._format_phrases(content.get('phrases', {}))}
-
-            Please provide your response as a JSON array of objects with the following format:
+            **Aufgabe:**
+            Extrahiere **{AI_SETTINGS['max_keywords']}** aussagekräftige Tags, die den Inhalt des Dokuments präzise beschreiben. Diese Tags sollen die Hauptthemen und -konzepte erfassen und können auch inferierte Begriffe enthalten, die nicht direkt im Text vorkommen.
+    
+            **Ziel:**
+            Erstellen Sie eine Liste von Tags, die für die Suche und das Verknüpfen ähnlicher Inhalte auf unserer Plattform verwendet werden können.
+    
+            **Vorgehensweise:**
+            - Analysieren Sie die bereitgestellten Metadaten, den Inhalt, die Wortwolkenstatistiken und die vorgeschlagenen Themen.
+            - Identifizieren Sie Schlüsselthemen und -konzepte, die den Kern des Dokuments darstellen.
+            - Schließen Sie relevante Begriffe ein, die das Thema umfassend darstellen, auch wenn sie nicht explizit im Text erwähnt werden.
+            - Vermeiden Sie allgemeine Füllwörter und nicht aussagekräftige Begriffe.
+    
+            **Ausgabeformat:**
+            Bitte geben Sie die Tags als JSON-Array aus, zum Beispiel:
             [
-                {{"keyword": "term1", "relevance": 0.95, "type": "word|phrase"}},
-                {{"keyword": "term2", "relevance": 0.85, "type": "word|phrase"}},
+                "TAG1",
+                "TAG2",
+                "TAG3",
                 ...
             ]
+    
+            **Eingaben:**
+    
+            1. **Metadaten:**
+            - **Titel:** {metadata.get('title', 'N/A')}
+            - **Beschreibung:** {metadata.get('description', 'N/A')}
+            - **Kategorie:** {metadata.get('category', 'N/A')}
+            - **Denomination:** {metadata.get('denomination', 'N/A')}
+            - **Zielgruppe (Alter):** {metadata.get('target_age_group', 'N/A')}
+            - **Anwendungsbereich:** {metadata.get('area_of_application', 'N/A')}
+            - **Bibelstellen:** {metadata.get('bible_passage', 'N/A')}
+            - **Thumbnail:** {metadata.get('thumbnail', 'N/A')}
+    
+            2. **Inhalt:**
+            {content.get('text', '')}
+    
+            3. **Wortwolkenstatistiken:**
+            - **Gesamtanzahl der Wörter:** {content.get('statistics', {}).get('total_words', 'N/A')}
+            - **Top 200 Wörter nach Häufigkeit:**
+            {self._format_frequencies(content.get('word_frequencies', {}))}
+    
+            4. **Vorgeschlagene Themen:**
+            {self._format_suggested_topics(content.get('suggested_topics', []))}
+    
+            **Hinweise:**
+            - Die Tags sollten thematisch relevant und prägnant sein.
+            - Es sollen nach Möglichkeit Einzelwörter sein
+            - Nur Worte aus den Sprachen, die im Dokument gesprochen werden, oder Namen.
+            - Vermeiden Sie die Verwendung von Füllwörtern wie "und", "aber" sowie Artikeln.
+            - Stellen Sie sicher, dass die Tags die Essenz des Dokuments einfangen, auch wenn bestimmte Begriffe nicht direkt im Text vorkommen.
             """
-            
+    
             # Log generated prompt
             self.ai_logger.log_prompt_generation(prompt)
             
