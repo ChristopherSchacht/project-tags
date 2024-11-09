@@ -127,7 +127,7 @@ OUTPUT_FORMAT = {
     'encoding': 'utf-8'
 }
 
-# System prompts and templates
+# System prompts and templates - We would need a German one for German an so on for every language in order for the output to match the language
 SYSTEM_PROMPT = """You are DocTagger, a specialized AI system focused solely on creating precise document tags. Your responses are always structured in two parts:
 
 1. A brief "ANALYSIS:" (2-3 sentences max) describing what the document is about

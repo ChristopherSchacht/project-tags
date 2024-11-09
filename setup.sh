@@ -37,20 +37,23 @@ if ! check_python_version; then
     exit 1
 fi
 
-# Check for Xcode Command Line Tools on macOS
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo -e "${BLUE}Checking for Xcode Command Line Tools...${NC}"
-    if ! xcode-select -p &>/dev/null; then
-        echo -e "${RED}Xcode Command Line Tools not found. Installing...${NC}"
-        xcode-select --install
-        echo -e "${RED}Please run this script again after Xcode Command Line Tools installation completes.${NC}"
-        exit 1
-    fi
+# Check available disk space (minimum 1GB)
+available_space=$(df -Pk . | tail -1 | awk '{print $4}')
+if [ $available_space -lt 1048576 ]; then  # 1GB in KB
+    echo -e "${RED}Insufficient disk space. At least 1GB required.${NC}"
+    exit 1
 fi
 
-# Create project directory structure
+# Create project directory structure if not exists
 echo -e "${BLUE}Creating project structure...${NC}"
-mkdir -p {config,modules,gui,output,temp,cache,logs,tests}
+for dir in config modules gui output temp cache logs; do
+    if [ ! -d "$dir" ]; then
+        mkdir -p "$dir"
+        echo -e "${GREEN}Created directory: $dir${NC}"
+    else
+        echo -e "${BLUE}Directory already exists: $dir${NC}"
+    fi
+done
 
 # Create virtual environment
 echo -e "${BLUE}Creating virtual environment...${NC}"
@@ -80,43 +83,29 @@ PyQt6-sip>=13.4.0
 
 # PDF processing
 PyPDF2>=3.0.0
-pdfminer.six>=20221105
+langdetect>=1.0.9
 
 # Text processing
-nltk>=3.8
-spacy>=3.5.0
-textblob>=0.17.1
+nltk==3.8.1  # Spezifische Version für bessere Kompatibilität
+matplotlib>=3.0.0
+wordcloud>=1.9.0
 
-# AI and ML
+# AI
 openai>=1.3.0
 tenacity>=8.2.0
-numpy>=1.24.0
-scikit-learn>=1.2.0
 
 # Utilities
 python-dotenv>=1.0.0
-rich>=13.0.0
-loguru>=0.7.0
-tqdm>=4.65.0
-
-# Testing
-pytest>=7.3.1
-pytest-qt>=4.2.0
-pytest-asyncio>=0.21.0
 EOL
 
-# Install requirements with error handling
+# Install requirements with error handling and progress display
 echo -e "${BLUE}Installing requirements...${NC}"
 if ! pip install -r requirements.txt; then
     echo -e "${RED}Failed to install requirements. Please check the error message above.${NC}"
     exit 1
 fi
 
-# Download spaCy model
-echo -e "${BLUE}Downloading spaCy language model...${NC}"
-python -m spacy download en_core_web_sm
-
-# Create NLTK setup script with updated error handling
+# Create simplified NLTK setup script
 echo -e "${BLUE}Setting up NLTK...${NC}"
 cat > setup_nltk.py << 'EOL'
 import ssl
@@ -135,7 +124,7 @@ def setup_nltk():
     nltk_dir = Path.home() / 'nltk_data'
     nltk_dir.mkdir(exist_ok=True)
 
-    required_data = ['punkt', 'stopwords', 'wordnet', 'averaged_perceptron_tagger']
+    required_data = ['punkt', 'stopwords']
     
     for data in required_data:
         try:
@@ -156,57 +145,29 @@ if ! python setup_nltk.py; then
     exit 1
 fi
 
-# Create test setup for PyQt
-echo -e "${BLUE}Creating PyQt test setup...${NC}"
-cat > tests/test_gui.py << EOL
-import pytest
-from PyQt6.QtWidgets import QApplication
-from gui.app_window import ModernMacOSWindow
-
-@pytest.fixture
-def app(qtbot):
-    test_app = QApplication([])
-    return test_app
-
-@pytest.fixture
-def window(app, qtbot):
-    window = ModernMacOSWindow(
-        process_callback=lambda x: None,
-        supported_languages=['en'],
-        default_metadata={}
-    )
-    window.show()
-    qtbot.addWidget(window)
-    return window
-
-def test_window_creation(window):
-    """Test that the window is created successfully."""
-    assert window.isVisible()
-    assert window.windowTitle() == "Document Analyzer"
-EOL
-
-# Create .env template with updated settings
+# Create simplified .env template with essential settings
 echo -e "${BLUE}Creating .env template...${NC}"
 cat > .env.template << EOL
-# Application Settings
-DEBUG=False
-LOG_LEVEL=INFO
-MAX_UPLOAD_SIZE=10485760  # 10MB in bytes
-
-# UI Settings
-ENABLE_DARK_MODE=True
-ENABLE_ANIMATIONS=True
-USE_SYSTEM_ACCENT_COLOR=True
-
 # AI Configuration
 AI_BASE_URL=http://localhost:1234/v1
 AI_API_KEY=your-api-key-here
 AI_MODEL=your-model-name
 EOL
 
+# Backup existing .env if it exists
+if [ -f .env ]; then
+    echo -e "${BLUE}Backing up existing .env file...${NC}"
+    cp .env .env.backup
+fi
+
+# Create .env from template if it doesn't exist
+if [ ! -f .env ]; then
+    echo -e "${BLUE}Creating .env from template...${NC}"
+    cp .env.template .env
+fi
+
 echo -e "${GREEN}Setup complete! Your development environment is ready.${NC}"
 echo -e "${BLUE}Additional steps:${NC}"
-echo -e "1. Copy .env.template to .env and configure your settings"
-echo -e "2. Run tests with 'pytest tests/'"
-echo -e "3. For development, activate the virtual environment with:"
+echo -e "1. Configure your API settings in .env"
+echo -e "2. For development, activate the virtual environment with:"
 echo -e "   source venv/bin/activate"

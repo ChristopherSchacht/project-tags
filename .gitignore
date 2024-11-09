@@ -32,6 +32,13 @@ logs/
 .env
 nltk_data/
 
+# Setup files
+.env.template
+.env.backup
+setup_nltk.py
+requirements.txt
+tests/
+
 # IDE
 .idea/
 .vscode/
