@@ -530,15 +530,14 @@ class AIHandler:
 
     async def extract_keywords(self, metadata: Dict, content: Dict) -> Dict:
         """
-        Extract keywords with enhanced content analysis and stricter response parsing.
-        Returns a dictionary with both 'tags' and 'keywords' for backward compatibility.
-    
+        Extract tags from content using AI analysis.
+        
         Args:
             metadata: Document metadata
             content: Content and analysis data
-    
+        
         Returns:
-            Dict: Extraction results including keywords and processing metadata
+            Dict: Extraction results including tags and processing metadata
         """
         start_time = time.time()
         retry_count = 0
@@ -563,7 +562,6 @@ class AIHandler:
                 # Format prompt and make request
                 prompt = self._format_prompt(metadata, content)
                 if retry_count > 0:
-                    # Add clearer format instructions for retry attempts
                     prompt += "\n\nIMPORTANT: Each tag MUST be in the format: {\"index\": number, \"tag\": \"word\"}"
                 
                 messages = [
@@ -585,77 +583,64 @@ class AIHandler:
                     json_str = response[json_start:json_end]
                     parsed_data = json.loads(json_str)
     
-                    # Handle different tag formats
-                    tags = []
-                    if 'tags' in parsed_data:
-                        raw_tags = parsed_data['tags']
-                        
-                        # Handle array of strings format
-                        if isinstance(raw_tags, list) and all(isinstance(x, str) for x in raw_tags):
-                            tags = [
-                                {
-                                    'tag': tag.strip(),
-                                    'index': idx + 1
-                                }
-                                for idx, tag in enumerate(raw_tags)
-                            ]
-                        # Handle array of objects format
-                        elif isinstance(raw_tags, list) and all(isinstance(x, dict) for x in raw_tags):
-                            tags = raw_tags
-                        else:
-                            raise AIResponseError("Unrecognized tags format")
-    
-                        # Validate and clean tags
-                        validated_tags = []
-                        for tag in tags:
-                            if isinstance(tag, dict) and 'tag' in tag:
-                                validated_tag = {
-                                    'tag': str(tag.get('tag', '')).strip(),
-                                    'index': int(tag.get('index', len(validated_tags) + 1))
-                                }
-                                if validated_tag['tag']:  # Only add non-empty tags
-                                    validated_tags.append(validated_tag)
-    
-                        if not validated_tags:
-                            raise AIResponseError("No valid tags found")
-    
-                        # Sort tags by index
-                        validated_tags.sort(key=lambda x: x['index'])
-    
-                        # Convert tags to keywords format for backward compatibility
-                        keywords = [
-                            {
-                                'keyword': tag['tag'],
-                                'relevance': 1.0,
-                                'index': tag['index']
-                            }
-                            for tag in validated_tags
-                        ]
-    
-                        # Prepare final result with metadata
-                        final_result = {
-                            'tags': validated_tags,
-                            'keywords': keywords,
-                            'processing_time': time.time() - start_time,
-                            'cached': False,
-                            'success': True,
-                            'metadata': {
-                                'timestamp': get_timestamp(),
-                                'model': self.model,
-                                'temperature': self.temperature
-                            }
-                        }
-    
-                        # Log final parsed result
-                        self.ai_logger.log_ai_response(response, final_result)
-    
-                        # Cache result
-                        self._cache_response(cache_key, final_result)
-    
-                        return final_result
-    
-                    else:
+                    # Handle tag format
+                    if 'tags' not in parsed_data:
                         raise AIResponseError("No tags found in response")
+    
+                    raw_tags = parsed_data['tags']
+                    
+                    # Handle array of strings format
+                    if isinstance(raw_tags, list) and all(isinstance(x, str) for x in raw_tags):
+                        tags = [
+                            {
+                                'tag': tag.strip(),
+                                'index': idx + 1
+                            }
+                            for idx, tag in enumerate(raw_tags)
+                        ]
+                    # Handle array of objects format
+                    elif isinstance(raw_tags, list) and all(isinstance(x, dict) for x in raw_tags):
+                        tags = raw_tags
+                    else:
+                        raise AIResponseError("Unrecognized tags format")
+    
+                    # Validate and clean tags
+                    validated_tags = []
+                    for tag in tags:
+                        if isinstance(tag, dict) and 'tag' in tag:
+                            validated_tag = {
+                                'tag': str(tag.get('tag', '')).strip(),
+                                'index': int(tag.get('index', len(validated_tags) + 1))
+                            }
+                            if validated_tag['tag']:  # Only add non-empty tags
+                                validated_tags.append(validated_tag)
+    
+                    if not validated_tags:
+                        raise AIResponseError("No valid tags found")
+    
+                    # Sort tags by index
+                    validated_tags.sort(key=lambda x: x['index'])
+    
+                    # Prepare final result with metadata
+                    final_result = {
+                        'tags': validated_tags,
+                        'processing_time': time.time() - start_time,
+                        'cached': False,
+                        'success': True,
+                        'metadata': {
+                            'timestamp': get_timestamp(),
+                            'model': self.model,
+                            'temperature': self.temperature
+                        }
+                    }
+    
+                    # Log final parsed result
+                    self.ai_logger.log_ai_response(response, final_result)
+    
+                    # Cache result
+                    self._cache_response(cache_key, final_result)
+    
+                    return final_result
     
                 except (json.JSONDecodeError, KeyError) as e:
                     raise AIResponseError(f"Invalid JSON response: {str(e)}")
@@ -668,7 +653,6 @@ class AIHandler:
                     logger.error(f"All {max_retries} attempts failed")
                     return {
                         'tags': [],
-                        'keywords': [],
                         'processing_time': time.time() - start_time,
                         'error': str(e),
                         'success': False,
@@ -678,8 +662,7 @@ class AIHandler:
                         }
                     }
                 
-                # Wait before retry (you might want to add exponential backoff here)
-                await asyncio.sleep(1)  # Simple delay between retries
+                await asyncio.sleep(1)
 
     def get_stats(self) -> Dict:
         """
