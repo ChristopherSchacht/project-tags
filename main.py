@@ -22,7 +22,8 @@ from config.config import (
     DEFAULT_METADATA,
     OUTPUT_DIR,
     AI_SETTINGS,
-    GENERATE_WORD_CLOUD
+    GENERATE_WORD_CLOUD,
+    DEFAULT_LANGUAGE
 )
 from modules.pdf_processor import PDFProcessor, PDFError
 from modules.text_analyzer import TextAnalyzer, TextAnalysisError
@@ -64,6 +65,10 @@ class KeywordExtractor:
 
             if not stats['success']:
                 raise PDFError(stats['error'])
+            
+            # Get detected language from PDF processing
+            detected_language = stats.get('detected_language', DEFAULT_LANGUAGE)
+            logger.debug(f"Detected language: {detected_language}")
 
             logger.debug(f"PDF text extracted, length: {len(text)}")
 
@@ -81,7 +86,7 @@ class KeywordExtractor:
                 'action': 'update_results', 
                 'text': "\n█ Analyzing text...\n"
             })
-            analyzer = TextAnalyzer()  # Language will be auto-detected
+            analyzer = TextAnalyzer(language=detected_language)   # Language will be auto-detected
             analysis_results = analyzer.analyze_text(text, generate_wordcloud=GENERATE_WORD_CLOUD)
 
             logger.debug("Text analysis complete")

@@ -23,7 +23,7 @@ LOG_DIR = PROJECT_ROOT / "logs"
 
 # Language settings
 SUPPORTED_LANGUAGES = ['en', 'de']
-DEFAULT_LANGUAGE = 'en'
+DEFAULT_LANGUAGE = 'de'
 
 # Path to the user-defined stopwords. 
 STOPWORDS_DE_PATH = CONFIG_DIR / "stopwords_de.txt" 
@@ -191,7 +191,7 @@ __all__ = [
 ]
 
 
-def detect_language(text: str, default_language: str = 'de') -> str:
+def detect_language(text: str, default_language: str = DEFAULT_LANGUAGE) -> str:
     """
     Detect the language of the given text.
     
