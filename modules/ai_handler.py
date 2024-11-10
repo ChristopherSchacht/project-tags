@@ -26,7 +26,9 @@ from config.config import (
     AI_SETTINGS,
     CACHE_DIR,
     ERROR_MESSAGES,
-    SYSTEM_PROMPT,
+    SYSTEM_PROMPTS,
+    detect_language, 
+    get_system_prompt, 
     CACHE_DURATION,
     MAX_WORDS_FOR_AI, 
     WORD_SCORE_WEIGHTS, 
@@ -193,6 +195,107 @@ class AIHandler:
                 'errors': 0,
                 'average_response_time': 0
             }
+
+            # Prompts in the correct languages
+            self.FORMAT_PROMPTS = {
+                'en': {
+                    'metadata_section': """=== METADATA ===
+                    Title: {title}
+                    Category: {category}
+                    Application: {area_of_application}
+                    Target Age: {target_age_group}
+                    Denomination: {denomination}
+                    Bible Passages: {bible_passage}""",
+
+                                    'content_section': """=== CONTENT ===
+                    {text}""",
+
+                                    'key_info_section': """=== KEY INFORMATION ===
+                    Most Relevant Words (Top {max_words}):
+                    {word_frequencies}
+
+                    Document Statistics:
+                    Total Words: {processed_words}
+                    Unique Words: {unique_words}
+                    Sentences: {sentence_count}
+
+                    Main Topics:
+                    {suggested_topics}""",
+
+                                    'output_section': """REQUIRED OUTPUT:
+
+                    ANALYSIS:
+                    [2-5 sentences identifying the specific document type and subject]
+
+                    TAGS:
+                    {{
+                        "tags": [
+                            {{"index": 1, "tag": "word"}},
+                            {{"index": 2, "tag": "another"}},
+                            {{"index": 3, "tag": "final"}}
+                        ]
+                    }}
+
+                    CRITICAL TAG RULES:
+                    - Each tag is ONE single word
+                    - Include general terms and specific identifiers
+                    - Split compound terms into separate tags
+                    - {min_keywords} to {max_keywords} tags total
+                    - Only lowercase letters
+                    - No special characters""",
+
+                    'retry_hint': "\n\nIMPORTANT: Each tag MUST be in the format: {{\"index\": number, \"tag\": \"word\"}}"
+                },
+
+                'de': {
+                    'metadata_section': """=== METADATEN ===
+                    Titel: {title}
+                    Kategorie: {category}
+                    Anwendungsbereich: {area_of_application}
+                    Zielgruppe: {target_age_group}
+                    Konfession: {denomination}
+                    Bibelstellen: {bible_passage}""",
+
+                    'content_section': """=== INHALT ===
+                    {text}""",
+
+                    'key_info_section': """=== SCHLÜSSELINFORMATIONEN ===
+                    Relevanteste Wörter (Top {max_words}):
+                    {word_frequencies}
+
+                    Dokument-Statistiken:
+                    Gesamtanzahl Wörter: {processed_words}
+                    Eindeutige Wörter: {unique_words}
+                    Sätze: {sentence_count}
+
+                    Hauptthemen:
+                    {suggested_topics}""",
+
+                    'output_section': """ERFORDERLICHE AUSGABE:
+
+                    ANALYSE:
+                    [2-5 Sätze zur Identifizierung des spezifischen Dokumenttyps und Themas]
+
+                    TAGS:
+                    {{
+                        "tags": [
+                            {{"index": 1, "tag": "wort"}},
+                            {{"index": 2, "tag": "weiteres"}},
+                            {{"index": 3, "tag": "letztes"}}
+                        ]
+                    }}
+
+                    KRITISCHE TAG-REGELN:
+                    - Jeder Tag ist EIN einzelnes Wort
+                    - Enthält allgemeine Begriffe und spezifische Bezeichner
+                    - Zusammengesetzte Begriffe in separate Tags aufteilen
+                    - {min_keywords} bis {max_keywords} Tags insgesamt
+                    - Nur Kleinbuchstaben
+                    - Keine Sonderzeichen""",
+
+                    'retry_hint': "\n\nWICHTIG: Jeder Tag MUSS im Format sein: {{\"index\": nummer, \"tag\": \"wort\"}}"
+                }
+            }
             
         except Exception as e:
             logger.error(f"AI handler initialization failed: {str(e)}")
@@ -343,70 +446,70 @@ class AIHandler:
     def _format_prompt(self, metadata: Dict, content: Dict) -> str:
         """
         Format prompt with metadata and enhanced content analysis.
-
-        Args:
-            metadata: Document metadata
-            content: Content and analysis data
-
-        Returns:
-            str: Formatted prompt
+        Now includes improved error handling and proper JSON escaping.
         """
         try:
             # Log input collection
             self.ai_logger.log_input_collection(metadata, content)
 
-            # Get analysis results from content
+            # Detect language from content
+            text = content.get('text', '')
+            language = detect_language(text)
+            
+            if language not in self.FORMAT_PROMPTS:
+                logger.warning(f"Unsupported language {language}, falling back to English")
+                language = 'en'
+
+            # Get language-specific prompt templates
+            prompts = self.FORMAT_PROMPTS[language]
+
+            # Format sections with proper error handling
+            try:
+                metadata_section = prompts['metadata_section'].format(
+                    title=metadata.get('title', 'N/A'),
+                    category=metadata.get('category', 'N/A'),
+                    area_of_application=metadata.get('area_of_application', 'N/A'),
+                    target_age_group=metadata.get('target_age_group', 'N/A'),
+                    denomination=metadata.get('denomination', 'N/A'),
+                    bible_passage=metadata.get('bible_passage', 'N/A')
+                )
+            except KeyError as e:
+                raise AIError(f"Missing metadata field: {str(e)}")
+
+            try:
+                content_section = prompts['content_section'].format(
+                    text=content.get('text', '')
+                )
+            except KeyError as e:
+                raise AIError(f"Missing content field: {str(e)}")
+
+            # Get analysis results with proper error handling
             analysis = content.get('analysis', {})
             statistics = analysis.get('statistics', {})
             word_frequencies = analysis.get('word_frequencies', {})
 
-            # Format prompt with detailed sections
-            prompt = f"""ANALYZE AND TAG THIS DOCUMENT:
+            try:
+                key_info_section = prompts['key_info_section'].format(
+                    max_words=MAX_WORDS_FOR_AI,
+                    word_frequencies=self._format_word_frequencies(word_frequencies),
+                    processed_words=statistics.get('processed_words', 'N/A'),
+                    unique_words=statistics.get('unique_words', 'N/A'),
+                    sentence_count=content.get('metadata', {}).get('sentence_count', 'N/A'),
+                    suggested_topics=self._format_suggested_topics(content.get('suggested_topics', []))
+                )
+            except KeyError as e:
+                raise AIError(f"Missing analysis field: {str(e)}")
 
-                === METADATA ===
-                Title: {metadata.get('title', 'N/A')}
-                Category: {metadata.get('category', 'N/A')}
-                Application: {metadata.get('area_of_application', 'N/A')}
-                Target Age: {metadata.get('target_age_group', 'N/A')}
-                Denomination: {metadata.get('denomination', 'N/A')}
-                Bible Passages: {metadata.get('bible_passage', 'N/A')}
+            try:
+                output_section = prompts['output_section'].format(
+                    min_keywords=AI_SETTINGS['min_keywords'],
+                    max_keywords=AI_SETTINGS['max_keywords']
+                )
+            except KeyError as e:
+                raise AIError(f"Missing AI settings: {str(e)}")
 
-                === CONTENT ===
-                {content.get('text', '')}
-
-                === KEY INFORMATION ===
-                Most Relevant Words (Top {MAX_WORDS_FOR_AI}):
-                {self._format_word_frequencies(word_frequencies)}
-
-                Document Statistics:
-                Total Words: {statistics.get('processed_words', 'N/A')}
-                Unique Words: {statistics.get('unique_words', 'N/A')}
-                Sentences: {content.get('metadata', {}).get('sentence_count', 'N/A')}
-
-                Main Topics:
-                {self._format_suggested_topics(content.get('suggested_topics', []))}
-
-                REQUIRED OUTPUT:
-
-                ANALYSIS:
-                [2-3 sentences identifying the specific document type and subject]
-
-                TAGS:
-                {{
-                  "tags": [
-                    {{"index": 1, "tag": "word"}},
-                    {{"index": 2, "tag": "another"}},
-                    {{"index": n, "tag": "final"}}
-                  ]
-                }}
-
-                CRITICAL TAG RULES:
-                - Each tag is ONE single word
-                - Include general terms and specific identifiers
-                - Split compound terms into separate tags
-                - {AI_SETTINGS['min_keywords']} to {AI_SETTINGS['max_keywords']} tags total
-                - Only lowercase letters
-                - No special characters"""
+            # Combine all sections with proper spacing
+            prompt = f"{metadata_section.strip()}\n\n{content_section.strip()}\n\n{key_info_section.strip()}\n\n{output_section.strip()}"
 
             # Log generated prompt
             self.ai_logger.log_prompt_generation(prompt)
@@ -530,19 +633,23 @@ class AIHandler:
 
     async def extract_keywords(self, metadata: Dict, content: Dict) -> Dict:
         """
-        Extract tags from content using AI analysis.
-        
+        Extract tags from content using AI analysis with language detection.
+
         Args:
             metadata: Document metadata
             content: Content and analysis data
-        
+
         Returns:
             Dict: Extraction results including tags and processing metadata
         """
         start_time = time.time()
         retry_count = 0
         max_retries = AI_SETTINGS['retry_attempts']
-        
+
+        # Detect language from content
+        text = content.get('text', '')
+        detected_language = detect_language(text)
+
         while retry_count < max_retries:
             try:
                 # Generate cache key
@@ -550,45 +657,49 @@ class AIHandler:
                     'metadata': metadata,
                     'content': content
                 })
-    
+
                 # Check cache
                 cached = await self._get_cached_response(cache_key)
                 if cached:
                     self.ai_logger.log_ai_response("Using cached response", cached)
                     return cached
-    
+
                 self.request_stats['cache_misses'] += 1
-    
+
                 # Format prompt and make request
                 prompt = self._format_prompt(metadata, content)
                 if retry_count > 0:
-                    prompt += "\n\nIMPORTANT: Each tag MUST be in the format: {\"index\": number, \"tag\": \"word\"}"
-                
+                    # Use language-specific retry hint
+                    prompt += self.FORMAT_PROMPTS[detected_language]['retry_hint']
+
+                # Get language-specific system prompt
+                system_prompt = get_system_prompt(text)
+
                 messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ]
-    
+
                 response = await self._make_ai_request(messages)
-    
+
                 # Extract JSON part from response
                 try:
                     # Find JSON block
                     json_start = response.find('{')
                     json_end = response.rfind('}') + 1
-    
+
                     if json_start == -1:
                         raise AIResponseError("No JSON block found")
-    
+
                     json_str = response[json_start:json_end]
                     parsed_data = json.loads(json_str)
-    
+
                     # Handle tag format
                     if 'tags' not in parsed_data:
                         raise AIResponseError("No tags found in response")
-    
+
                     raw_tags = parsed_data['tags']
-                    
+
                     # Handle array of strings format
                     if isinstance(raw_tags, list) and all(isinstance(x, str) for x in raw_tags):
                         tags = [
@@ -603,7 +714,7 @@ class AIHandler:
                         tags = raw_tags
                     else:
                         raise AIResponseError("Unrecognized tags format")
-    
+
                     # Validate and clean tags
                     validated_tags = []
                     for tag in tags:
@@ -614,13 +725,13 @@ class AIHandler:
                             }
                             if validated_tag['tag']:  # Only add non-empty tags
                                 validated_tags.append(validated_tag)
-    
+
                     if not validated_tags:
                         raise AIResponseError("No valid tags found")
-    
+
                     # Sort tags by index
                     validated_tags.sort(key=lambda x: x['index'])
-    
+
                     # Prepare final result with metadata
                     final_result = {
                         'tags': validated_tags,
@@ -630,25 +741,26 @@ class AIHandler:
                         'metadata': {
                             'timestamp': get_timestamp(),
                             'model': self.model,
-                            'temperature': self.temperature
+                            'temperature': self.temperature,
+                            'detected_language': detected_language  # Add detected language to metadata
                         }
                     }
-    
+
                     # Log final parsed result
                     self.ai_logger.log_ai_response(response, final_result)
-    
+
                     # Cache result
                     self._cache_response(cache_key, final_result)
-    
+
                     return final_result
-    
+
                 except (json.JSONDecodeError, KeyError) as e:
                     raise AIResponseError(f"Invalid JSON response: {str(e)}")
-    
+
             except Exception as e:
                 logger.error(f"Attempt {retry_count + 1} failed: {str(e)}")
                 retry_count += 1
-                
+
                 if retry_count >= max_retries:
                     logger.error(f"All {max_retries} attempts failed")
                     return {
@@ -658,10 +770,11 @@ class AIHandler:
                         'success': False,
                         'metadata': {
                             'timestamp': get_timestamp(),
-                            'error_type': type(e).__name__
+                            'error_type': type(e).__name__,
+                            'detected_language': detected_language  # Add detected language to metadata
                         }
                     }
-                
+
                 await asyncio.sleep(1)
 
     def get_stats(self) -> Dict:

@@ -5,6 +5,7 @@ Contains all constants, paths, and settings used across the project.
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from langdetect import detect, LangDetectException
 
 # Load environment variables
 load_dotenv()
@@ -38,6 +39,7 @@ MAX_TEMP_FILE_AGE = 24  # hours
 CACHE_DURATION = 7  # days
 
 # Text analysis settings
+GENERATE_WORD_CLOUD = True
 MAX_WORDS_WORDCLOUD = 200
 MIN_WORD_LENGTH = 3
 MAX_WORD_LENGTH = 45
@@ -127,17 +129,17 @@ OUTPUT_FORMAT = {
     'encoding': 'utf-8'
 }
 
-# System prompts and templates - We would need a German one for German an so on for every language in order for the output to match the language
-SYSTEM_PROMPT = """You are DocTagger, a specialized AI system focused solely on creating precise document tags. Your responses are always structured in two parts:
+# System prompts and templates - We would ideally have one for every language
+SYSTEM_PROMPTS = {
+    'en': """You are DocTagger, a specialized AI system focused solely on creating precise document tags. Your responses are always structured in two parts:
 
-1. A brief "ANALYSIS:" (2-3 sentences max) describing what the document is about
+1. A brief "ANALYSIS:" (2-5 sentences max) describing what the document is and what it is about
 2. A "TAGS:" section containing a valid JSON with relevant tags
 
 Core Behaviors:
 - You extract exact terminology from documents
 - You identify technical terms and proper names
 - You convert complex phrases into single-word tags
-- You use hyphens for compound terms
 - You respond only in lowercase
 - You focus on search-relevant terms
 - You never add explanations or suggestions
@@ -145,14 +147,36 @@ Core Behaviors:
 Strict Tag Rules:
 - Only single words
 - Only lowercase
-- Only hyphens allowed (no other special characters)
-- No spaces
+- No spaces, instead individual tags
 - No common words
 - Must be search-relevant
-- Must be from document language or proper names
+- Must be from document language or proper names or describe it perfectly.
 
-You maintain extreme precision in your JSON output format and stop immediately after providing it. You never add additional comments, explanations, or suggestions."""
-#"""You are an intelligent assistant specialized in content analysis and keyword extraction. Your task is to analyze content and extract the most relevant keywords that best describe the material's topic, theme, and key concepts."""
+You maintain extreme precision in your JSON output format and stop immediately after providing it. You never add additional comments, explanations, or suggestions.""",
+
+    'de': """Du bist DocTagger, ein spezialisiertes KI-System, das ausschließlich präzise Dokumenten-Tags erstellt. Deine Antworten sind immer in zwei Teile gegliedert:
+
+1. Eine kurze "ANALYSE:" (maximal 2-5 Sätze), die beschreibt, was das Dokument ist und worum es in dem Dokument geht
+2. Ein "TAGS:"-Abschnitt mit einem gültigen JSON mit relevanten Tags
+
+Kernverhalten:
+- Du extrahierst exakte Terminologie aus Dokumenten
+- Du identifizierst Fachbegriffe und Eigennamen
+- Du wandelst komplexe Phrasen in Einwort-Tags um
+- Du antwortest nur in Kleinbuchstaben
+- Du konzentrierst dich auf suchrelevante Begriffe
+- Du fügst nie Erklärungen oder Vorschläge hinzu
+
+Strenge Tag-Regeln:
+- Nur einzelne Wörter
+- Nur Kleinbuchstaben
+- Keine Leerzeichen, stattdessen eigene tags
+- Keine allgemeinen Wörter
+- Muss suchrelevant sein
+- Muss aus der Dokumentsprache oder Eigennamen stammen oder es perfekt beschreiben.
+
+Du hältst extreme Präzision in deinem JSON-Ausgabeformat ein und hörst sofort danach auf. Du fügst niemals zusätzliche Kommentare, Erklärungen oder Vorschläge hinzu."""
+}
 
 # Export settings for use in other modules
 __all__ = [
@@ -165,3 +189,40 @@ __all__ = [
     'COMMON_STOPWORDS', 'SUPPORTED_FILE_TYPES', 'ERROR_MESSAGES',
     'LOG_SETTINGS', 'OUTPUT_FORMAT', 'SYSTEM_PROMPT'
 ]
+
+
+def detect_language(text: str, default_language: str = 'de') -> str:
+    """
+    Detect the language of the given text.
+    
+    Args:
+        text (str): Text to analyze
+        default_language (str): Default language to return if detection fails
+        
+    Returns:
+        str: Detected language code ('en' or 'de')
+    """
+    try:
+        detected = detect(text)
+        # Map detected language to supported languages
+        if detected == 'en':
+            return 'en'
+        elif detected in ['de', 'at', 'ch']:  # Include Austrian and Swiss German variants
+            return 'de'
+        else:
+            return default_language
+    except LangDetectException:
+        return default_language
+
+def get_system_prompt(text: str) -> str:
+    """
+    Get the appropriate system prompt based on detected language.
+    
+    Args:
+        text (str): Text to analyze for language detection
+        
+    Returns:
+        str: Language-appropriate system prompt
+    """
+    language = detect_language(text)
+    return SYSTEM_PROMPTS.get(language, SYSTEM_PROMPTS['de'])

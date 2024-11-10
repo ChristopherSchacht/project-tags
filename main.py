@@ -21,8 +21,8 @@ from gui.app_window import AppWindow
 from config.config import (
     DEFAULT_METADATA,
     OUTPUT_DIR,
-    SUPPORTED_LANGUAGES,
-    AI_SETTINGS
+    AI_SETTINGS,
+    GENERATE_WORD_CLOUD
 )
 from modules.pdf_processor import PDFProcessor, PDFError
 from modules.text_analyzer import TextAnalyzer, TextAnalysisError
@@ -41,7 +41,7 @@ class KeywordExtractor:
         self.processing = False
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    async def process_document(self, pdf_path: Path, metadata: Dict, language: str, message_queue: asyncio.Queue) -> None:
+    async def process_document(self, pdf_path: Path, metadata: Dict, message_queue: asyncio.Queue) -> None:
         if self.processing:
             await message_queue.put({'action': 'update_results', 'text': "Processing already in progress\n"})
             return
@@ -81,8 +81,8 @@ class KeywordExtractor:
                 'action': 'update_results', 
                 'text': "\n█ Analyzing text...\n"
             })
-            analyzer = TextAnalyzer(language=language)
-            analysis_results = analyzer.analyze_text(text, generate_wordcloud=False)
+            analyzer = TextAnalyzer()  # Language will be auto-detected
+            analysis_results = analyzer.analyze_text(text, generate_wordcloud=GENERATE_WORD_CLOUD)
 
             logger.debug("Text analysis complete")
 
@@ -124,7 +124,8 @@ class KeywordExtractor:
                 'statistics': stats,
                 'analysis': analysis_results,
                 'tags': keywords_result.get('tags', []),
-                'processing_time': keywords_result.get('processing_time', 0)
+                'processing_time': keywords_result.get('processing_time', 0),
+                'detected_language': keywords_result.get('metadata', {}).get('detected_language', 'unknown')
             }
             
             output_path = OUTPUT_DIR / f'results_{timestamp}.json'
@@ -162,10 +163,11 @@ class KeywordExtractor:
                 })
                 await asyncio.sleep(0.01)
 
-            # Display save location
+            # Display save location and language
             await message_queue.put({
                 'action': 'update_results',
-                'text': f"\n{'='*50}\n📁 Results saved to:\n{output_path}\n{'='*50}\n"
+                'text': f"\n{'='*50}\n📁 Results saved to: {output_path}\n"
+                       f"🌐 Detected language: {results['detected_language']}\n{'='*50}\n"
             })
 
             await message_queue.put({'action': 'set_status', 'text': "Processing complete"})
@@ -204,7 +206,6 @@ def main():
         # Create main window
         window = AppWindow(
             process_callback=processor.process_document,
-            supported_languages=SUPPORTED_LANGUAGES,
             default_metadata=DEFAULT_METADATA
         )
         

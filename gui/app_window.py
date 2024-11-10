@@ -2,8 +2,8 @@
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFileDialog, QComboBox, QLineEdit,
-    QProgressBar, QTextEdit, QScrollArea, QFrame
+    QPushButton, QLabel, QFileDialog, QLineEdit,
+    QProgressBar, QTextEdit, QScrollArea, QFrame, QPlainTextEdit
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPalette, QColor
@@ -21,12 +21,11 @@ class AsyncWorker(QThread):
     error = pyqtSignal(str)
     progress = pyqtSignal(dict)
     
-    def __init__(self, process_func, pdf_path, metadata, language):
+    def __init__(self, process_func, pdf_path, metadata):  # Removed language parameter
         super().__init__()
         self.process_func = process_func
         self.pdf_path = pdf_path
         self.metadata = metadata
-        self.language = language
         self.loop = None
         
     def run(self):
@@ -54,11 +53,10 @@ class AsyncWorker(QThread):
                     # Start message handler task
                     message_handler_task = asyncio.create_task(message_handler())
                     
-                    # Run the main processing function
+                    # Run the main processing function (removed language parameter)
                     await self.process_func(
                         self.pdf_path,
                         self.metadata,
-                        self.language,
                         progress_queue
                     )
                     
@@ -89,10 +87,9 @@ class AsyncWorker(QThread):
 class AppWindow(QMainWindow):
     """Modern macOS-styled main window."""
     
-    def __init__(self, process_callback, supported_languages, default_metadata):
+    def __init__(self, process_callback, default_metadata):  # Removed supported_languages parameter
         super().__init__()
         self.process_callback = process_callback
-        self.supported_languages = supported_languages
         self.default_metadata = default_metadata
         self.pdf_path = None
         self.worker = None
@@ -173,7 +170,7 @@ class AppWindow(QMainWindow):
                 background-color: #007AFF;
                 border-radius: 4px;
             }
-            QLineEdit, QComboBox {
+            QLineEdit {
                 padding: 6px;
                 border: 1px solid #E0E0E0;
                 border-radius: 6px;
@@ -202,15 +199,7 @@ class AppWindow(QMainWindow):
         file_layout.addWidget(self.file_label, 1)
         file_layout.addWidget(browse_button)
         
-        # Language selection
-        lang_layout = QHBoxLayout()
-        self.language_combo = QComboBox()
-        self.language_combo.addItems(self.supported_languages)
-        lang_layout.addWidget(QLabel("Language:"))
-        lang_layout.addWidget(self.language_combo, 1)
-        
         layout.addLayout(file_layout)
-        layout.addLayout(lang_layout)
         parent_layout.addWidget(frame)
         
     def create_metadata_section(self, parent_layout):
@@ -254,22 +243,15 @@ class AppWindow(QMainWindow):
         parent_layout.addLayout(layout)
         
     def create_results_section(self, parent_layout):
-        """Create results display section with optimized text widget."""
-        from PyQt6.QtWidgets import QPlainTextEdit  # Add this import at the top of your file
-
+        """Create results display section with QPlainTextEdit."""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameStyle(QFrame.Shape.NoFrame)
 
-        # Use QPlainTextEdit instead of QTextEdit for better performance
         self.results_text = QPlainTextEdit()
         self.results_text.setReadOnly(True)
         self.results_text.setMaximumBlockCount(10000)
-
-        # Set a reasonable maximum size to prevent memory issues
         self.results_text.setMaximumHeight(2000)
-
-        # Optimize text widget
         self.results_text.setUndoRedoEnabled(False)
 
         scroll.setWidget(self.results_text)
@@ -311,8 +293,7 @@ class AppWindow(QMainWindow):
         self.worker = AsyncWorker(
             self.process_callback,
             self.pdf_path,
-            self.get_metadata(),
-            self.language_combo.currentText()
+            self.get_metadata()
         )
         
         self.worker.finished.connect(self.processing_finished)
@@ -323,13 +304,9 @@ class AppWindow(QMainWindow):
     def processing_finished(self):
         """Handle processing completion."""
         try:
-            # Update UI before cleanup
             self.statusBar().showMessage("Processing complete")
             QApplication.processEvents()
-            
-            # Clean up worker
             self.cleanup_worker()
-            
             logger.debug("Processing finished successfully")
             
         except Exception as e:
@@ -342,19 +319,16 @@ class AppWindow(QMainWindow):
             logger.debug(f"Processing error occurred: {error_msg}")
             self.cleanup_worker()
             self.statusBar().showMessage("Error occurred")
-
-            # Use appendPlainText instead of append for QPlainTextEdit
+            
             if hasattr(self, 'results_text'):
                 self.results_text.appendPlainText(f"Error: {error_msg}\n")
-
-                # Move cursor to end
                 cursor = self.results_text.textCursor()
                 cursor.movePosition(cursor.MoveOperation.End)
                 self.results_text.setTextCursor(cursor)
-
+                
         except Exception as e:
             logger.error(f"Error in processing_error handler: {str(e)}", exc_info=True)
-        
+            
     def update_progress(self, progress_data):
         """Update UI with progress information."""
         try:
@@ -372,17 +346,11 @@ class AppWindow(QMainWindow):
             if action == 'update_results':
                 if hasattr(self, 'results_text'):
                     try:
-                        # Use appendPlainText for QPlainTextEdit
                         self.results_text.appendPlainText(str(text))
-                        
-                        # Move cursor to end
                         cursor = self.results_text.textCursor()
                         cursor.movePosition(cursor.MoveOperation.End)
                         self.results_text.setTextCursor(cursor)
-                        
-                        # Process events
                         QApplication.processEvents()
-                        
                     except Exception as e:
                         logger.error(f"Error updating text widget: {str(e)}", exc_info=True)
                         
@@ -399,7 +367,6 @@ class AppWindow(QMainWindow):
         """Clean up worker thread and resources."""
         if self.worker:
             try:
-                # Set a flag to stop processing
                 self.worker.finished.disconnect()
                 self.worker.error.disconnect()
                 self.worker.progress.disconnect()
@@ -459,6 +426,6 @@ if __name__ == '__main__':
     import sys
     
     app = QApplication(sys.argv)
-    window = AppWindow(lambda: None, ['en', 'de'], {'field1': 'default'})
+    window = AppWindow(lambda: None, {'field1': 'default'})  # Updated parameters
     window.run()
     sys.exit(app.exec())
