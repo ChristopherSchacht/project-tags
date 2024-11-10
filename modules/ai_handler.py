@@ -207,10 +207,10 @@ class AIHandler:
                     Denomination: {denomination}
                     Bible Passages: {bible_passage}""",
 
-                                    'content_section': """=== CONTENT ===
+                    'content_section': """=== CONTENT ===
                     {text}""",
 
-                                    'key_info_section': """=== KEY INFORMATION ===
+                    'key_info_section': """=== KEY INFORMATION ===
                     Most Relevant Words (Top {max_words}):
                     {word_frequencies}
 
@@ -222,7 +222,7 @@ class AIHandler:
                     Main Topics:
                     {suggested_topics}""",
 
-                                    'output_section': """REQUIRED OUTPUT:
+                    'output_section': """REQUIRED OUTPUT:
 
                     ANALYSIS:
                     [2-5 sentences identifying the specific document type and subject]
