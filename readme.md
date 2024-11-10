@@ -2,6 +2,8 @@
 
 This project is a Python-based system for creating descriptive tags for PDF documents via a mix of text-statistics and ai.
 
+<img width="500" alt="image" src="https://github.com/user-attachments/assets/177aec46-df5d-4bac-b2b3-1ea6b2133cb5">
+
 ## Prerequisites
 
 - Python 3.8 or higher
